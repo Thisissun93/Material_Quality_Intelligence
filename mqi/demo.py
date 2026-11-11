@@ -26,6 +26,8 @@ from reportlab.pdfgen import canvas
 
 from . import config, db
 
+GAGE_SEED = 1
+
 RNG = np.random.default_rng(20261111)
 OPS = ["Kim", "Lee", "Park"]
 
@@ -226,30 +228,43 @@ def write_files(t: dict, out: Path) -> None:
                          f"{RNG.choice(OPS)},{(r.made_at + timedelta(days=2)):%Y-%m-%d} 10:00")
         (out / f"DV2_resin_{m}.csv").write_text("\n".join(lines), encoding="utf-8")
 
-    # ---- supplier CoA PDFs
+    # ---- supplier CoA PDFs (two house styles, like real suppliers)
     for _, r in t["resin"].iterrows():
-        _coa_table(out, r, [("Epoxy Equivalent Weight", "g/eq", "180 - 195", r.eew + RNG.normal(0, 0.8)),
-                            ("Viscosity @25°C", "mPa·s", "9000 - 14000", r.resin_visc + RNG.normal(0, 150))])
+        _coa_pdf(out, r, "Bisphenol-A Liquid Epoxy Resin", "EP-128", 200, [
+            ("Appearance", "Visual", "-", "Clear liquid", "Conforms"),
+            ("Epoxy Equivalent Weight", "ASTM D1652", "g/eq", "180 - 195", r.eew + RNG.normal(0, 0.8)),
+            ("Viscosity @25°C", "ASTM D445", "mPa·s", "9000 - 14000", r.resin_visc + RNG.normal(0, 150)),
+            ("Hydrolyzable chlorine", "ASTM D1726", "ppm", "max 300", None)])
     for _, r in t["filler"].iterrows():
         if r.supplier == "NanoSphere":
             coa_d50 = 0.25 * r.d50 + 0.75 * 3.05 + RNG.normal(0, 0.03)  # CoA lags reality
-            _coa_dotted(out, r, [("Mean particle size (D50)", f"{coa_d50:.2f}", "µm"),
-                                 ("Moisture content", f"{(r.moisture + RNG.normal(0, 0.003)) * 1e4:.0f}", "ppm")])
+            _coa_report(out, r, "Spherical Fused Silica", "NS-30F", 1000, [
+                ("Mean particle size (D50)", "2.4~3.6", f"{coa_d50:.2f}", "µm"),
+                ("Moisture content", "1000 max", f"{(r.moisture + RNG.normal(0, 0.003)) * 1e4:.0f}", "ppm"),
+                ("Specific surface area (BET)", "1.0~3.0", f"{RNG.normal(2.1, 0.1):.1f}", "m2/g"),
+                ("Appearance", "White powder", "OK", "")])
         else:
-            _coa_table(out, r, [("D50", "µm", "2.4 - 3.6", r.d50 + RNG.normal(0, 0.03)),
-                                ("Moisture", "%", "max 0.10", r.moisture + RNG.normal(0, 0.003))])
+            _coa_pdf(out, r, "Spherical Silica Filler", "SW-3", 1000, [
+                ("Appearance", "Visual", "-", "White powder", "Conforms"),
+                ("D50", "ISO 13320", "µm", "2.4 - 3.6", r.d50 + RNG.normal(0, 0.03)),
+                ("Moisture", "Karl Fischer", "%", "max 0.10", r.moisture + RNG.normal(0, 0.003)),
+                ("Coarse particles +45µm", "Laser", "%", "max 0.01", None)])
     for _, r in t["hard"].iterrows():
-        _coa_table(out, r, [("Amine Value", "mgKOH/g", "520 - 560", r.amine_value + RNG.normal(0, 1.2))])
+        _coa_pdf(out, r, "Modified Aromatic Amine Hardener", "AT-540", 180, [
+            ("Appearance", "Visual", "-", "Amber liquid", "Conforms"),
+            ("Amine Value", "ASTM D2074", "mgKOH/g", "520 - 560", r.amine_value + RNG.normal(0, 1.2)),
+            ("Color (Gardner)", "ASTM D1544", "-", "max 8", None)])
 
     # ---- Gage R&R study
+    GRNG = np.random.default_rng(GAGE_SEED)  # own stream: other demo files must not change this study
     rows = []
-    parts = np.linspace(2900, 4150, 10) + RNG.normal(0, 60, 10)
+    parts = np.linspace(2900, 4150, 10) + GRNG.normal(0, 60, 10)
     bias = {"Kim": 0, "Lee": 12, "Park": 72}
     for pi, true in enumerate(parts, 1):
-        inter = {o: RNG.normal(0, 14) for o in OPS}
+        inter = {o: GRNG.normal(0, 14) for o in OPS}
         for o in OPS:
             for trial in (1, 2, 3):
-                rows.append(f"{pi},{o},{trial},{true + bias[o] + inter[o] + RNG.normal(0, 34):.0f}")
+                rows.append(f"{pi},{o},{trial},{true + bias[o] + inter[o] + GRNG.normal(0, 34):.0f}")
     (out / "GageRR_viscometer_2026-10.csv").write_text(
         "Gage R&R Study,RotaVisc DV-2 SN 7781\nCharacteristic,Viscosity @25C\n\n"
         "Part,Operator,Trial,Viscosity (cP)\n" + "\n".join(rows), encoding="utf-8")
@@ -263,44 +278,98 @@ def write_files(t: dict, out: Path) -> None:
     (out / "ViscoLab_retest.txt").write_text("\n".join(lines), encoding="utf-8")
 
 
-def _coa_header(c: canvas.Canvas, r, title: str) -> float:
-    c.setFont("Helvetica-Bold", 15)
-    c.drawString(20 * mm, 275 * mm, r.supplier)
-    c.setFont("Helvetica", 9)
-    c.drawString(20 * mm, 269 * mm, f"Supplier: {r.supplier} Co., Ltd.")
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(20 * mm, 255 * mm, title)
-    c.setFont("Helvetica", 10)
-    c.drawString(20 * mm, 245 * mm, f"Lot No.: {r.lot_id}")
-    c.drawString(110 * mm, 245 * mm, f"Manufactured: {r.made_at:%Y-%m-%d}")
-    return 230 * mm
+ADDR = {"Resinova": "12 Polymer Road, Ulsan, KR", "KoPolymer": "88 Chemical-ro, Yeosu, KR",
+        "SilicaWorks": "5 Quartz Street, Penang, MY", "NanoSphere": "3-1 Kogyo-cho, Osaka, JP",
+        "AmineTech": "200 Industrial Ave, Kaohsiung, TW"}
 
 
-def _coa_table(out: Path, r, items) -> None:
+def _coa_pdf(out: Path, r, product: str, grade: str, qty: int, items) -> None:
+    """Table-style Certificate of Analysis (letterhead, lot block, test table, conformity, sign-off)."""
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    st = getSampleStyleSheet()
+    doc = SimpleDocTemplate(str(out / f"CoA_{r.lot_id}.pdf"), pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
+                            topMargin=16 * mm, bottomMargin=16 * mm, title=f"CoA {r.lot_id}")
+    made = pd.Timestamp(r.made_at)
+    head = Table([[Paragraph(f"<b><font size=15>{r.supplier}</font></b><br/><br/><font size=8>{r.supplier} Co., Ltd. · "
+                             f"{ADDR.get(r.supplier, '')}</font>", st["Normal"]),
+                   Paragraph("<font size=8>Doc. QA-F-021 Rev.3</font>", st["Normal"])]], colWidths=[130 * mm, 44 * mm])
+    head.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, 0), 1.2, colors.black), ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+    info = [["Customer", "MQI Demo Plant", "Lot No.", r.lot_id],
+            ["Product", product, "Grade", grade],
+            ["Mfg. date", f"{made:%Y-%m-%d}", "Expiry date", f"{made + pd.Timedelta(days=365):%Y-%m-%d}"],
+            ["Quantity", f"{qty} kg", "Test date", f"{made + pd.Timedelta(days=1):%Y-%m-%d}"]]
+    ti = Table(info, colWidths=[26 * mm, 61 * mm, 26 * mm, 61 * mm])
+    ti.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 9),
+                            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f1f5f9")),
+                            ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f1f5f9"))]))
+    rows = [["No.", "Test item", "Method", "Unit", "Specification", "Result", "Judge"]]
+    for k, (name, method, unit, spec, val) in enumerate(items, 1):
+        if val is None:
+            val = f"{RNG.uniform(0.2, 0.5) * float(spec.split()[-1]):.0f}" if spec.split()[-1].replace(".", "").isdigit() else "-"
+        elif not isinstance(val, str):
+            val = f"{val:.3g}" if abs(val) < 10 else f"{val:.1f}"
+        rows.append([str(k), name, method, unit, spec, val, "Pass"])
+    tt = Table(rows, colWidths=[10 * mm, 50 * mm, 27 * mm, 20 * mm, 30 * mm, 22 * mm, 15 * mm], repeatRows=1)
+    tt.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 9),
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
+                            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("ALIGN", (5, 1), (5, -1), "RIGHT")]))
+    sign = Table([["Prepared by", "Approved by (QA Manager)", "Issue date"],
+                  ["J. Lin", "S. Park", f"{made + pd.Timedelta(days=2):%Y-%m-%d}"]],
+                 colWidths=[58 * mm, 58 * mm, 58 * mm], rowHeights=[6 * mm, 12 * mm])
+    sign.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 9),
+                              ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9"))]))
+    doc.build([head, Spacer(1, 6 * mm), Paragraph("<b><font size=14>CERTIFICATE OF ANALYSIS</font></b>", st["Title"]),
+               Spacer(1, 2 * mm), ti, Spacer(1, 6 * mm), tt, Spacer(1, 6 * mm),
+               Paragraph("We hereby certify that the above lot has been inspected and conforms to the agreed specification.",
+                         st["Normal"]), Spacer(1, 8 * mm), sign, Spacer(1, 30 * mm),
+               Paragraph("<font size=7 color='#94a3b8'>Synthetic demo document generated by Material Quality Intelligence. "
+                         "Not a real supplier certificate.</font>", st["Normal"])])
+
+
+def _coa_report(out: Path, r, product: str, grade: str, qty: int, items) -> None:
+    """Second house style: 'Inspection Report' with spec before result and unit after it."""
     c = canvas.Canvas(str(out / f"CoA_{r.lot_id}.pdf"), pagesize=A4)
-    y = _coa_header(c, r, "CERTIFICATE OF ANALYSIS")
-    c.setFont("Helvetica-Bold", 10)
-    for x, h in zip((20, 85, 120, 160), ("Test Item", "Unit", "Specification", "Result")):
+    made = pd.Timestamp(r.made_at)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(20 * mm, 276 * mm, f"{r.supplier}")
+    c.setFont("Helvetica", 8)
+    c.drawString(20 * mm, 271 * mm, f"Supplier: {r.supplier} Co., Ltd. · {ADDR.get(r.supplier, '')}")
+    c.line(20 * mm, 268 * mm, 190 * mm, 268 * mm)
+    c.setFont("Helvetica-Bold", 13)
+    c.drawCentredString(105 * mm, 256 * mm, "INSPECTION REPORT  (Quality Certificate)")
+    c.setFont("Helvetica", 9.5)
+    y = 244 * mm
+    for a, b_, x2, d in (("Product", f"{product} {grade}", "Lot No.", r.lot_id),
+                         ("Mfg. date", f"{made:%Y-%m-%d}", "Shelf life", "12 months"),
+                         ("Quantity", f"{qty} kg (40 bags)", "Customer", "MQI Demo Plant")):
+        c.drawString(20 * mm, y, f"{a}:")
+        c.drawString(45 * mm, y, b_)
+        c.drawString(110 * mm, y, f"{x2}:")
+        c.drawString(135 * mm, y, d)
+        y -= 6.5 * mm
+    y -= 6 * mm
+    c.setFont("Helvetica-Bold", 9.5)
+    for x, h in ((20, "Inspection item"), (95, "Standard"), (135, "Result"), (160, "Unit")):
         c.drawString(x * mm, y, h)
-    c.setFont("Helvetica", 10)
-    for name, unit, spec, val in items:
+    c.line(20 * mm, y - 2 * mm, 190 * mm, y - 2 * mm)
+    c.setFont("Helvetica", 9.5)
+    for name, std, val, unit in items:
         y -= 8 * mm
         c.drawString(20 * mm, y, name)
-        c.drawString(85 * mm, y, unit)
-        c.drawString(120 * mm, y, spec)
-        c.drawString(160 * mm, y, f"{val:.3g}" if abs(val) < 10 else f"{val:.1f}")
-    c.drawString(20 * mm, y - 20 * mm, "Conclusion: PASS")
-    c.save()
-
-
-def _coa_dotted(out: Path, r, items) -> None:
-    c = canvas.Canvas(str(out / f"CoA_{r.lot_id}.pdf"), pagesize=A4)
-    y = _coa_header(c, r, "Quality Certificate")
-    c.setFont("Courier", 10)
-    for name, val, unit in items:
-        y -= 9 * mm
-        c.drawString(20 * mm, y, f"{name} {'.' * (40 - len(name))} {val} {unit}")
-    c.drawString(20 * mm, y - 18 * mm, "Released by QA")
+        c.drawString(95 * mm, y, std)
+        c.drawString(135 * mm, y, val)
+        c.drawString(160 * mm, y, unit)
+    c.line(20 * mm, y - 3 * mm, 190 * mm, y - 3 * mm)
+    y -= 14 * mm
+    c.drawString(20 * mm, y, "Judgement: Accepted")
+    c.drawString(20 * mm, y - 7 * mm, f"Inspector: K. Sato        Quality Assurance: H. Mori        Date: {made + pd.Timedelta(days=1):%Y-%m-%d}")
+    c.setFont("Helvetica", 7)
+    c.setFillGray(0.6)
+    c.drawString(20 * mm, 15 * mm, "Synthetic demo document generated by Material Quality Intelligence. Not a real supplier certificate.")
     c.save()
 
 

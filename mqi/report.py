@@ -7,7 +7,7 @@ from datetime import datetime
 import markdown_it
 
 from . import config, engine
-from .insight import drafts, rules
+from .insight import drafts, eightd, rules
 from .insight.rules import lab, num
 
 _md = markdown_it.MarkdownIt("commonmark").enable("table")
@@ -57,6 +57,6 @@ def build(b: engine.Bundle, lang: str = "ko") -> str:
                        f"<td>{num(t['bias'])}</td><td>{t['p_value']:.3f}</td><td>{t['trust']}</td></tr>")
         out.append("</table>")
 
-    out.append(f"<h2>8D</h2>{_md.render(drafts.eight_d(b, 'viscosity', lang))}")
+    out.append(f"<h2>8D</h2>{eightd.fragment(drafts.eight_d(b, 'viscosity', lang))}")
     out.append("<p class='muted'>Synthetic demo data. Generated automatically; review before use.</p></body></html>")
     return "".join(out)

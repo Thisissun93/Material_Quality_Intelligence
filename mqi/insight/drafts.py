@@ -8,61 +8,9 @@ from .rules import lab, num, snum
 
 
 def eight_d(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> str:
-    s = config.specs()["product"]
-    spec = s["properties"][prop]
-    sp = b.spc.get(prop)
-    cap = b.cap.get(prop)
-    i = next((v for k, v in (sp["first"].items() if sp else []) if k != "3σ (rule 1)" and v is not None), None)
-    i = min([v for v in sp["first"].values() if v is not None], default=None) if sp else None
-    lot = b.product["lot_id"].iloc[i] if i is not None else "-"
-    att = b.attribution.get(prop)
-    share = engine.supplier_share(b, prop)
-    rows = att.head(4) if att is not None else None
-    after = engine.lots_after(b, prop)
-    x = b.product[prop]
-    ko = lang == "ko"
-    L = []
-    L.append(f"# 8D — {s['name']} {lab(prop, lang)}" + (" 상승" if ko else " shift"))
-    L.append(f"{date.today():%Y-%m-%d} · draft\n")
-    L.append("## D2 " + ("문제 기술" if ko else "Problem description"))
-    L.append((f"- 대상: {s['id']} {lab(prop, 'ko')} (규격 {spec.get('lsl')}–{spec.get('usl')} {spec['unit']})" if ko else
-              f"- Item: {s['id']} {lab(prop, 'en')} (spec {spec.get('lsl')}–{spec.get('usl')} {spec['unit']})"))
-    L.append((f"- 기준 구간 평균 {x.iloc[:b.baseline].mean():.0f} → 최근 10로트 평균 {x.tail(10).mean():.0f}" if ko else
-              f"- Baseline mean {x.iloc[:b.baseline].mean():.0f} → last 10 lots {x.tail(10).mean():.0f}"))
-    L.append((f"- 최초 조기경보: {lot}, 영향 로트 {len(after)}개" if ko else
-              f"- First early alarm: {lot}; {len(after)} lots affected"))
-    if cap:
-        L.append(f"- Cpk {cap.cpk:.2f} / Ppk {cap.ppk:.2f}")
-    L.append("\n## D3 " + ("임시 조치" if ko else "Containment"))
-    L.append("- " + ("영향 로트 출하 전 재검 및 고객 통보 여부 판단" if ko else "Re-test affected lots before shipment; decide on customer notice"))
-    L.append("- " + ("의심 원료 로트 격리, 다음 배치는 위험도 최저 조합 사용" if ko else "Quarantine suspect raw lots; use the lowest-risk combination next"))
-    L.append("\n## D4 " + ("원인 분석 (데이터 근거)" if ko else "Root cause (data evidence)"))
-    if rows is not None:
-        L.append("| " + ("원료 인자" if ko else "Raw attribute") + " | Baseline | Alarm | "
-                 + ("예측 영향" if ko else "Predicted effect") + " |")
-        L.append("|---|---|---|---|")
-        for _, r in rows.iterrows():
-            L.append(f"| {lab(r['feature'], lang)} | {num(r['baseline'])} | {num(r['alarm'])} | {snum(r['effect'])} |")
-    if len(share):
-        L.append("")
-        L.append(("필러 공급사 비중 (기준→경보): " if ko else "Filler supplier share (baseline→alarm): ")
-                 + ", ".join(f"{k} {v.baseline:.0%}→{v.alarm:.0%}" for k, v in share.iterrows()))
-    if b.trust is not None:
-        bad = b.trust[b.trust["trust"] == "untrusted"]
-        for _, t in bad.iterrows():
-            L.append(("- " + f"{t['supplier']} CoA {lab(t['property'], 'ko')}가 자사 측정과 불일치 "
-                      f"(차이 {snum(t['bias'])}, {t['drift_since'] or '-'}부터 확대) → CoA만으로 이상을 놓침") if ko else
-                     ("- " + f"{t['supplier']} CoA {lab(t['property'], 'en')} disagrees with in-house data "
-                      f"(gap {snum(t['bias'])}, growing since {t['drift_since'] or '-'}) → CoA alone missed it"))
-    L.append("\n## D5/D6 " + ("영구 대책" if ko else "Permanent corrective action"))
-    L.append("- " + ("공급사 SCAR 발행: 분급 공정 변경 여부, 측정법·교정 이력 확인" if ko else
-                     "Issue SCAR: classification process change? measurement method and calibration records"))
-    L.append("- " + ("필러 D50 수입검사 전수화, 관리한계 = 제품 영향 기준으로 재설정" if ko else
-                     "100% incoming D50 check; set limits from the product-impact model"))
-    L.append("\n## D7 " + ("재발 방지" if ko else "Prevent recurrence"))
-    L.append("- " + ("EWMA 조기경보 + CoA 신뢰도 상시 모니터링, 배치 전 원료 조합 위험도 확인 의무화" if ko else
-                     "Keep EWMA early warning and CoA trust monitoring; require a pre-batch risk check"))
-    return "\n".join(L)
+    """8D in markdown. Kept for compatibility; the structure lives in eightd.py."""
+    from . import eightd
+    return eightd.markdown(eightd.build(b, prop, lang))
 
 
 def scar(b: engine.Bundle, supplier: str, prop: str, lang: str = "en") -> str:
@@ -74,7 +22,19 @@ def scar(b: engine.Bundle, supplier: str, prop: str, lang: str = "en") -> str:
     t = t.iloc[0] if len(t) else None
     unit = config.all_property_specs()[prop]["unit"]
     ko = lang == "ko"
-    L = [f"**{'제목' if ko else 'Subject'}:** SCAR — {lab(prop, lang)} {'불일치' if ko else 'discrepancy'} ({supplier})\n"]
+    from datetime import date, timedelta
+    mat = w["material"].iloc[0] if len(w) else ""
+    today = date.today()
+    L = [f"# SCAR — {supplier} · {lab(prop, lang)}\n",
+         "| | |\n|---|---|",
+         f"| {'SCAR 번호' if ko else 'SCAR No.'} | SCAR-{today:%y%m}-{supplier[:3].upper()}-{prop[:3].upper()} |",
+         f"| {'공급사 / 자재' if ko else 'Supplier / material'} | {supplier} / {config.specs()['raw_materials'].get(mat, {}).get('label', mat)} |",
+         f"| {'관련 로트' if ko else 'Lots concerned'} | {', '.join(p['lot_id'].tail(4))} |",
+         f"| {'발행일' if ko else 'Issued'} | {today} |",
+         f"| {'회신 기한' if ko else 'Response due'} | {'봉쇄(D3)' if ko else 'Containment (D3)'} {today + timedelta(days=2)} · "
+         f"{'원인/대책(D4–D5)' if ko else 'Root cause & action (D4–D5)'} {today + timedelta(days=14)} · "
+         f"{'유효성(D6)' if ko else 'Validation (D6)'} {today + timedelta(days=45)} |",
+         f"| {'구분' if ko else 'Category'} | {'CoA-수입검사 불일치 (품질 문서 신뢰성)' if ko else 'CoA vs incoming inspection mismatch'} |\n"]
     if ko:
         L.append(f"{supplier} 품질 담당자님,\n\n최근 납품 로트에서 CoA의 {lab(prop, 'ko')} 값과 당사 수입검사 값의 차이가 커지고 있어 시정조치를 요청드립니다.")
     else:

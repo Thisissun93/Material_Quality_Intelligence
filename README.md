@@ -17,7 +17,7 @@ https://materialqualityintelligence-dknsnjemfstfko4zluzplu.streamlit.app/
 | 이상을 보여 주고 끝 | **MES 원료 이력(genealogy)**을 따라가 어떤 원료·공급사가 원인인지 수치로 제시 |
 | CoA를 그대로 신뢰 | **CoA vs 자사 측정**을 비교해 공급사 성적서의 신뢰도와 "언제부터 어긋났는지" 판정 |
 | 장비 교체 영향을 공정 변화로 오인 | **공분산분석(ANCOVA)**으로 원료 영향을 뺀 순수 장비 편차만 분리 |
-| 보고서는 사람이 작성 | 근거 표가 들어간 **8D·SCAR 초안** 자동 생성 (한/영) |
+| 보고서는 사람이 작성 | 데이터로 채운 **표준 8D(D0–D8)·SCAR** 자동 작성: 5W2H·IS/IS NOT, 발생/유출 원인 분리, 6M 검증, 원료 한계 재계산 (한/영, A4·Excel) |
 | 결과만 보여 줌 | 재고 원료 조합별 **다음 배치 이탈 확률**을 예측해 사용할 조합을 추천 |
 
 ## 핵심 기능
@@ -37,7 +37,9 @@ https://materialqualityintelligence-dknsnjemfstfko4zluzplu.streamlit.app/
 python -m mqi.ingest.watcher "D:/LabShare/Exports"
 ```
 
-공급사 CoA PDF는 표 형식, 점선 형식 등 양식이 달라도 같은 동의어 사전으로 읽습니다.
+공급사 CoA PDF는 표 형식, 점선 형식 등 양식이 달라도 같은 동의어 사전으로 읽습니다. `공급사 품질 → CoA 문서`에서 원본 PDF와 추출값·자사 측정·규격을 나란히 보고, 차이가 큰 성적서만 골라 볼 수 있습니다.
+
+![coa](docs/img/coa_viewer.png)
 
 ### 2. 분석
 | 영역 | 내용 |
@@ -50,17 +52,31 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 | 측정 장비 편차 | ANCOVA로 원료 영향을 통제한 장비 교체 Bias |
 
 ### 3. 조치
-판단 기준은 `config/rules.yaml`에만 있습니다. 결과는 근거·조치가 붙은 우선순위 목록, 8D 초안, 공급사 SCAR 초안, HTML 보고서로 나옵니다.
+판단 기준은 `config/rules.yaml`에만 있습니다. 결과는 근거·조치가 붙은 우선순위 목록, 8D, 공급사 SCAR, HTML 보고서로 나옵니다.
+
+8D는 Ford G8D / VDA 8D 구성을 따릅니다.
+
+| 단계 | 자동으로 채우는 내용 |
+|---|---|
+| D0–D2 | 증상·ERA, 기능별 팀, 원인을 가정하지 않은 문제 정의, 5W2H, 데이터 기반 IS / IS NOT (물성·공급사·시점·측정자) |
+| D3 | 원료 재고·재공·출하분·고객 단위 봉쇄 수량, 담당, 목표일, 해제 기준 |
+| D4 | **발생 원인**과 **유출(미검출) 원인**을 기술적(TRC)·시스템(MRC)으로 분리, 5-Why, 6M 판정, 검증 근거 |
+| D5–D6 | 두 원인 각각의 영구 대책과 검증 방법. 원료 수입 한계는 모델로 다시 계산 (예: D50 하한 2.4 → 2.58 µm) |
+| D7–D8 | PFMEA·관리계획서 변경안, 표준 개정, 수평 전개, 교훈, 종결 체크리스트 |
+
+원인이 측정 장비로 판정되면(예: DSC 교체) 봉쇄·원인·대책이 측정 시스템 기준으로 바뀝니다. 편집 후 A4 HTML(브라우저에서 PDF 인쇄), Excel 양식, Markdown으로 내려받습니다.
+
+![8d](docs/img/report_8d.png)
 
 ## 데모 데이터에 심어 둔 문제와 앱이 찾은 결과
 
 | 심어 둔 문제 | 앱의 판단 |
 |---|---|
 | NanoSphere 실리카 D50이 7번째 로트부터 감소 | 점도 이동을 3σ보다 먼저 경보, 원인 1순위 D50(+353 mPa·s), NanoSphere 비중 증가 |
-| NanoSphere CoA는 계속 약 3.0 µm로 기재 | 해당 공급사·항목만 "CoA 신뢰 불가", SF-NA-014부터 차이 확대 |
+| NanoSphere CoA는 계속 약 3.0 µm로 기재 | 해당 공급사·항목만 "CoA 신뢰 불가", SF-NA-016부터 차이 확대 |
 | 8월 DSC 교체, 새 장비가 Tg를 +2.2 ℃ 높게 측정 | 원료로 설명 안 됨 → ANCOVA로 +1.9 ℃ 장비 편차 분리 |
 | UF-2609-012: 단일 값은 정상, 조합만 비정상 | T² 경보 + 단일 항목 정상으로 "숨은 이상" 분류 |
-| Gage R&R에서 측정자 Park이 높게 측정 | 재현성 우세, Park +64 mPa·s 치우침 |
+| Gage R&R에서 측정자 Park이 높게 측정 | 재현성 우세, Park +72 mPa·s 치우침 |
 
 위 내용은 `tests/test_findings.py`가 매번 확인합니다.
 
@@ -102,9 +118,9 @@ flowchart LR
 ```
 mqi/
   instruments/   fingerprint · registry(매칭·학습) · parse
-  ingest/        pipeline · watcher · coa
+  ingest/        pipeline · watcher · coa · coa_docs
   analytics/     msa · capability · spc · supplier · genealogy
-  insight/       rules(판정) · drafts(8D/SCAR) · llm(선택)
+  insight/       rules(판정) · eightd(8D) · drafts(SCAR) · llm(선택)
   engine.py      전체 분석 1회 실행
 app/             Streamlit (한국어/English)
 config/          specs · rules · vocabulary · instruments/*.yaml
@@ -119,4 +135,4 @@ Taeyang Kim · [github.com/Thisissun93](https://github.com/Thisissun93)
 ---
 
 ### English summary
-An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus 8D and SCAR drafts. All data is synthetic; the test suite checks that every planted problem is found.
+An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, and a CoA document viewer. All data is synthetic; the test suite checks that every planted problem is found.
