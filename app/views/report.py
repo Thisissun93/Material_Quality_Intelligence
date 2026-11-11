@@ -20,16 +20,25 @@ def render():
                        type="primary", width="stretch")
 
     text = drafts.eight_d(b, prop, lang)
-    if c1.button(ui.t("polish"), width="stretch", disabled=not llm.available()):
-        with st.spinner("…"):
-            text = llm.polish(text, lang)
-    if not llm.available():
+    with c1.expander(ui.t("ai_key"), expanded=False):
+        st.text_input("API key", type="password", key="api_key", placeholder="sk-ant-…",
+                      label_visibility="collapsed")
+        st.caption(ui.t("ai_key_note"))
+    key = st.session_state.get("api_key") or None
+    if c1.button(ui.t("polish"), width="stretch", disabled=not llm.available(key)):
+        try:
+            with st.spinner("…"):
+                st.session_state[f"polished_{prop}_{lang}"] = llm.polish(text, lang, key)
+        except Exception as e:
+            c1.error(f"API: {e}")
+    text = st.session_state.get(f"polished_{prop}_{lang}", text)
+    if not llm.available(key):
         c1.caption(ui.t("polish_off"))
     with c2:
         st.subheader(ui.t("eightd"))
         view, edit = st.tabs(["미리보기" if lang == "ko" else "Preview", "편집" if lang == "ko" else "Edit"])
         with edit:
-            edited = st.text_area(" ", text, height=520, label_visibility="collapsed", key=f"8d_{prop}_{lang}")
+            edited = st.text_area(" ", text, height=520, label_visibility="collapsed")
         with view:
             st.markdown(edited)
         st.download_button(ui.t("download"), edited, file_name=f"8D_{prop}.md")

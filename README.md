@@ -75,7 +75,7 @@ pytest -q                       # 29개 테스트
 | 규격·판단 기준 변경 | 앱 `설정` 화면 또는 `config/*.yaml` 수정 (저장 시 이전 버전 자동 보관) |
 | 새 장비 추가 | 파일을 올리고 `새 형식 학습`에서 확인 → 저장, 또는 YAML 하나 추가 |
 | 동의어 추가 | `config/vocabulary.yaml`에 한 줄 |
-| AI 문장 다듬기 (선택) | 환경변수 `ANTHROPIC_API_KEY` 설정. Claude 구독과 별개인 개발자용 API 키로, 사용량만큼 과금됩니다. 없어도 모든 기능이 규칙 기반으로 동작합니다. |
+| AI 문장 다듬기 (선택) | `보고서` 화면 → `AI 설정`에 Anthropic API 키 입력 (세션에만 보관, 저장 안 함). 또는 환경변수 `ANTHROPIC_API_KEY`. Claude 구독과 별개인 개발자용 키로 사용량만큼 과금되며, 없어도 모든 기능이 규칙 기반으로 동작합니다. |
 
 ## 검증
 - Gage R&R 제곱합은 `statsmodels` ANOVA와 1e-9 수준까지 일치 (`tests/test_stats.py`)
