@@ -1,12 +1,18 @@
 # Material Quality Intelligence
 
-반도체 패키징 소재(언더필·에폭시 접착제) 공장의 품질 데이터를 **장비 제조사·펌웨어·단위·언어에 상관없이 자동으로 모으고**, MSA·공정능력·SPC·공급사 품질·원료→제품 예측까지 한 번에 분석해 **조치(8D·SCAR)까지 만들어 주는** Streamlit 앱입니다.
+[![tests](https://github.com/Thisissun93/Material_Quality_Intelligence/actions/workflows/tests.yml/badge.svg)](https://github.com/Thisissun93/Material_Quality_Intelligence/actions/workflows/tests.yml)
+![python](https://img.shields.io/badge/python-3.12-3776AB)
+![streamlit](https://img.shields.io/badge/app-Streamlit-FF4B4B)
 
-https://materialqualityintelligence-dknsnjemfstfko4zluzplu.streamlit.app/
+반도체 패키징 소재(언더필·에폭시 접착제) 공장의 품질 데이터를 **장비 제조사·펌웨어·단위·언어에 상관없이 자동으로 모으고**, MSA·공정능력·SPC·공급사 품질·원료→제품 예측을 한 번에 분석해 **8D·SCAR·출하 성적서까지 만들어 주는** Streamlit 앱입니다.
 
-> 모든 데이터는 합성 데이터입니다. 실제 공장처럼 여러 장비 형식과 숨은 문제를 일부러 심어 두었고, 앱이 그것을 스스로 찾아내는지 테스트로 검증합니다.
+**▶ [데모 앱 열기](https://materialqualityintelligence-dknsnjemfstfko4zluzplu.streamlit.app/)** (설치 없이 브라우저에서 바로 실행, 한국어/English)
+
+> 모든 데이터는 합성 데이터입니다. 실제 공장처럼 여러 장비 형식과 숨은 문제를 일부러 심어 두었고, 앱이 그 문제를 스스로 찾아내는지 테스트로 검증합니다.
 
 ![overview](docs/img/overview.png)
+
+**목차** · [무엇이 다른가](#무엇이-다른가) · [3분 둘러보기](#3분-둘러보기) · [핵심 기능](#핵심-기능) · [심어 둔 문제와 결과](#데모-데이터에-심어-둔-문제와-앱이-찾은-결과) · [실행](#실행) · [검증](#검증) · [구조](#구조) · [English](#english-summary)
 
 ## 무엇이 다른가
 
@@ -22,10 +28,21 @@ https://materialqualityintelligence-dknsnjemfstfko4zluzplu.streamlit.app/
 | 조치는 엑셀로 따로 관리 | 8D·SCAR 조치를 **담당·기한·상태**로 추적하고, 상태가 8D D5·D6에 자동 반영 |
 | 출하 성적서는 수기 작성 | 출하 판정(가능/보류/불가)을 통과한 로트만 **출하 CoA PDF** 발행 |
 
+## 3분 둘러보기
+
+| 순서 | 화면 | 볼 것 |
+|---|---|---|
+| 1 | 개요 | 우선 조치 목록: 점도 이동, Tg 장비 편차, CoA 신뢰 불가, 고객 클레임 |
+| 2 | SPC | EWMA가 3σ보다 4로트 먼저 경보, 차트 위 4M 변경점 |
+| 3 | 공급사 품질 → CoA 문서 | NanoSphere 성적서 원본과 자사 측정의 차이 |
+| 4 | 원료→제품 예측 | 원인 기여도 1순위 D50, 재고 원료 조합별 이탈 확률 |
+| 5 | 보고서 | 데이터로 채운 8D (출발점을 고객 클레임으로 바꿔 보기) → "조치 등록" |
+| 6 | 조치·클레임 / 출하 판정·성적서 | 등록된 조치의 상태 관리, 보류 로트와 출하 CoA 발행 |
+
 ## 핵심 기능
 
 ### 1. 장비 자동 인식 (Searching → Matching → Choice)
-같은 점도라도 장비마다 출력이 다릅니다. `cP`/`mPa·s`/`Pa·s`, 콤마/세미콜론/탭, 소수점 콤마(유럽 로케일), 켈빈, ppm, 펌웨어별 열 이름, 한 줄에 한 값(long) 또는 `키: 값` 보고서.
+같은 점도라도 장비마다 출력이 다릅니다. 단위(`cP`/`mPa·s`/`Pa·s`), 구분자(콤마/세미콜론/탭), 소수점 콤마(유럽 로케일), 켈빈·ppm 표기, 펌웨어별 열 이름, 한 줄에 한 값(long) 형식이나 `키: 값` 보고서 형식까지 제각각입니다.
 
 1. **Search**: 등록된 모든 장비 프로파일(`config/instruments/*.yaml`)을 파일에 대입합니다.
 2. **Match**: 구조 점수(서명 문구·열 이름 유사도·구분자/소수점)와 내용 점수(변환한 값이 물리적으로 말이 되는지)를 합쳐 신뢰도를 냅니다. DSC 파일을 점도계로 잘못 읽으면 내용 점수에서 떨어집니다.
@@ -33,13 +50,13 @@ https://materialqualityintelligence-dknsnjemfstfko4zluzplu.streamlit.app/
 
 ![learn](docs/img/learn_format.png)
 
-공유 폴더를 감시하면 장비가 파일을 저장하는 즉시 수집됩니다.
+공유 폴더를 감시하면 장비가 파일을 저장하는 즉시 수집합니다.
 
 ```bash
 python -m mqi.ingest.watcher "D:/LabShare/Exports"
 ```
 
-공급사 CoA PDF는 표 형식, 점선 형식 등 양식이 달라도 같은 동의어 사전으로 읽습니다. `공급사 품질 → CoA 문서`에서 원본 PDF와 추출값·자사 측정·규격을 나란히 보고, 차이가 큰 성적서만 골라 볼 수 있습니다.
+공급사 CoA PDF는 표 형식, 검사 성적서 형식 등 양식이 달라도 같은 동의어 사전으로 읽습니다. `공급사 품질 → CoA 문서`에서 원본 PDF와 추출값·자사 측정값·규격을 나란히 보고, 차이가 큰 성적서만 골라 볼 수 있습니다.
 
 ![coa](docs/img/coa_viewer.png)
 
@@ -58,7 +75,7 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 ![spc](docs/img/spc.png)
 
 ### 3. 조치
-판단 기준은 `config/rules.yaml`에만 있습니다. 결과는 근거·조치가 붙은 우선순위 목록, 8D, 공급사 SCAR, HTML 보고서로 나옵니다.
+판단 기준은 `config/rules.yaml` 한 곳에서 관리합니다. 결과는 근거와 조치가 붙은 우선순위 목록, 8D, 공급사 SCAR, HTML 보고서로 나옵니다.
 
 8D는 Ford G8D / VDA 8D 구성을 따릅니다.
 
@@ -70,17 +87,19 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 | D5–D6 | 두 원인 각각의 영구 대책과 검증 방법. 원료 수입 한계는 모델로 다시 계산 (예: D50 하한 2.4 → 2.58 µm) |
 | D7–D8 | PFMEA·관리계획서 변경안, 표준 개정, 수평 전개, 교훈, 종결 체크리스트 |
 
-원인이 측정 장비로 판정되면(예: DSC 교체) 봉쇄·원인·대책이 측정 시스템 기준으로 바뀝니다. 편집 후 A4 HTML(브라우저에서 PDF 인쇄), Excel 양식, Markdown으로 내려받습니다.
+원인이 측정 장비로 판정되면(예: DSC 교체) 봉쇄·원인·대책이 측정 시스템 기준으로 바뀝니다. 고객 클레임을 출발점으로 고르면 고객 재고 봉쇄와 24시간 회신 기한이 들어간 클레임 8D가 됩니다. 앱에서 편집한 뒤 A4 HTML(브라우저에서 PDF로 인쇄), Excel 양식, Markdown으로 내려받습니다.
 
 ![8d](docs/img/report_8d.png)
 
 | 화면 | 내용 |
 |---|---|
-| 조치·클레임 | 8D에서 "조치 등록"을 누르면 D3·D5 조치가 등록됨. 담당·기한·상태·메모를 표에서 바로 수정, 기한 초과 표시, Excel 내보내기. 고객 클레임을 등록하면 클레임 기준 8D(고객 재고 봉쇄, 24시간 회신)로 바로 이동 |
-| 출하 판정·성적서 | 최근 로트를 출하 가능 / 보류(규격 경계 5% 이내, T² 이상, 진행 중 클레임) / 불가(규격 이탈·미측정)로 판정. 가능 로트는 출하 CoA PDF 발행, 보류 로트는 QA 승인 전까지 HOLD 워터마크 초안만 |
+| 조치·클레임 | 8D에서 "조치 등록"을 누르면 D3·D5 조치가 등록됩니다. 담당·기한·상태·메모를 표에서 바로 고치고, 기한이 지나면 표시되며, Excel로 내보낼 수 있습니다. 클레임을 등록하면 클레임 기준 8D로 바로 이동합니다. |
+| 출하 판정·성적서 | 최근 로트를 출하 가능 / 보류(규격 경계 5% 이내, T² 이상, 진행 중 클레임) / 불가(규격 이탈·미측정)로 판정합니다. 가능 로트는 출하 CoA PDF를 발행하고, 보류 로트는 QA 승인 전까지 HOLD 워터마크 초안만 나옵니다. |
 
-![actions](docs/img/actions.png)
-![shipping](docs/img/shipping.png)
+<table><tr>
+<td><img src="docs/img/actions.png" alt="actions"></td>
+<td><img src="docs/img/shipping.png" alt="shipping"></td>
+</tr></table>
 
 ## 데모 데이터에 심어 둔 문제와 앱이 찾은 결과
 
@@ -95,22 +114,22 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 | KoPolymer는 8로트뿐, Ppk 0.77 | 신뢰구간 0.30–1.23 → "판정 보류(데이터 부족)", 강화 판정하지 않음 |
 | 고객 클레임 1건: 규격 내지만 점도 상위 로트 | 클레임 기준 8D, 해당 로트 출하 판정 "보류" |
 
-위 내용은 `tests/`의 테스트 39개가 매번 확인합니다.
+위 결과는 `tests/`의 테스트 39개가 커밋마다 GitHub Actions에서 확인합니다.
 
 ## 실행
 
 ```bash
 pip install -r requirements.txt
 streamlit run app/main.py       # 첫 실행 시 데모 데이터를 자동 생성
-pytest -q                       # 29개 테스트
+pytest -q                       # 테스트 39개
 ```
 
 | 하고 싶은 일 | 방법 |
 |---|---|
-| 규격·판단 기준 변경 | 앱 `설정` 화면 또는 `config/*.yaml` 수정 (저장 시 이전 버전 자동 보관) |
+| 규격·판단 기준 변경 | 앱 `설정` 화면 또는 `config/*.yaml` 수정 (저장할 때 이전 버전 자동 보관) |
 | 새 장비 추가 | 파일을 올리고 `새 형식 학습`에서 확인 → 저장, 또는 YAML 하나 추가 |
 | 동의어 추가 | `config/vocabulary.yaml`에 한 줄 |
-| AI 문장 다듬기 (선택) | `보고서` 화면 → `AI 설정`에 Anthropic API 키 입력 (세션에만 보관, 저장 안 함). 또는 환경변수 `ANTHROPIC_API_KEY`. Claude 구독과 별개인 개발자용 키로 사용량만큼 과금되며, 없어도 모든 기능이 규칙 기반으로 동작합니다. |
+| AI 문장 다듬기 (선택) | `보고서` 화면 → `AI 설정`에 Anthropic API 키 입력 (세션에만 보관, 저장하지 않음). 환경변수 `ANTHROPIC_API_KEY`도 가능. 키가 없어도 모든 기능이 규칙 기반으로 동작합니다. |
 
 ## 검증
 - Gage R&R 제곱합은 `statsmodels` ANOVA와 1e-9 수준까지 일치 (`tests/test_stats.py`)
