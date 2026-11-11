@@ -1,0 +1,21 @@
+# What a column or a CoA line may be called, across makers, firmware and languages.
+# The matcher uses this to map an unknown file to canonical fields.
+# Add a synonym here and every unknown format benefits.
+
+fields:
+  lot_id:      [sample id, sample, sample name, probe, lot, lot no, lot number, batch, batch no, 시료, 시료명, 로트, charge]
+  operator:    [operator, user, analyst, bediener, 측정자, 작업자, tested by]
+  measured_at: [timestamp, date, time, date/time, datum, measured, 측정일시, 측정일, test date]
+
+properties:
+  viscosity:   [viscosity, visc, viskosität, eta, η, 점도, dynamic viscosity, apparent viscosity]
+  tg:          [tg, glass transition, tg midpoint, 유리전이, 유리전이온도, tg (midpoint)]
+  peak_temp:   [peak temperature, peak, peak temp, 피크온도, cure peak, exotherm peak]
+  enthalpy:    [enthalpy, delta h, ΔH, heat of reaction, integral normalized, 반응열, 엔탈피]
+  filler_pct:  [residue, filler content, ash, inorganic content, 필러함량, 잔류량]
+  d50:         [d50, dv50, median particle size, mean particle size, d(0.5), 평균입경, 입도]
+  moisture:    [moisture, water content, h2o, 수분, kf water]
+  eew:         [eew, epoxy equivalent, epoxy equivalent weight, epoxide equivalent, 에폭시당량]
+  amine_value: [amine value, amine number, total amine value, 아민가]
+
+ignore: [spindle, speed, torque, span, d10, d90, shear rate, method, unit, result id, temp, temperature, comment, status]

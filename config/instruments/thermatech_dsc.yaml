@@ -1,0 +1,12 @@
+id: thermatech_dsc
+label: ThermaTech DSC · summary report
+category: dsc
+layout: keyvalue
+signature: [ThermaTech, DSC Summary Report]
+columns:
+  lot_id: Sample Name
+  operator: Operator
+  measured_at: Run Date
+  peak_temp: Peak Temperature
+  enthalpy: Enthalpy (normalized)
+  tg: Tg (midpoint)

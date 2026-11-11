@@ -1,0 +1,30 @@
+# Decision thresholds for the insight engine. Change numbers, not code.
+
+msa:
+  grr_ok: 10        # %StudyVar below this = acceptable (AIAG)
+  grr_marginal: 30  # 10-30 = marginal, above = unacceptable
+  ndc_min: 5
+
+capability:
+  cpk_target: 1.33
+  cpk_min: 1.00
+  stability_gap: 0.20   # Cpk - Ppk above this suggests special causes
+
+spc:
+  sigma: overall          # overall | moving_range
+  nelson_rules: [1, 2, 3, 4, 5, 6, 7, 8]
+  ewma_lambda: 0.2
+  ewma_L: 2.7
+  cusum_k: 0.5
+  cusum_h: 4.0
+  t2_alpha: 0.01
+  t2_window: 30          # reference = previous N lots; set null for a fixed baseline
+
+supplier:
+  coa_bias_alpha: 0.05     # paired test on CoA vs in-house value
+  coa_bias_practical: 0.25 # bias / spec half-width that matters
+  skip_lot_ok_ppk: 1.67
+
+release:
+  risk_block: 0.20   # predicted P(out of spec) above this blocks pre-release
+  risk_watch: 0.05

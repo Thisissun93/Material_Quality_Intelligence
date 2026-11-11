@@ -1,0 +1,56 @@
+# Product and raw-material specifications.
+# Edit here; every page reads from this file.
+
+product:
+  id: UF-300
+  name: Capillary Underfill UF-300
+  properties:
+    viscosity:   {unit: mPa·s, lsl: 2500, usl: 4500, target: 3500, label: Viscosity @25°C}
+    tg:          {unit: °C,    lsl: 135,  usl: 160,  target: 147,  label: Tg (DSC midpoint)}
+    peak_temp:   {unit: °C,    lsl: 150,  usl: 166,  target: 158,  label: DSC cure peak}
+    enthalpy:    {unit: J/g,   lsl: 180,  usl: 260,  target: 220,  label: Cure enthalpy ΔH}
+    filler_pct:  {unit: wt%,   lsl: 58.0, usl: 62.0, target: 60.0, label: Filler content}
+
+raw_materials:
+  epoxy_resin:
+    label: Epoxy resin
+    suppliers: [Resinova, KoPolymer]
+    properties:
+      eew:        {unit: g/eq,  lsl: 180, usl: 195,  label: Epoxy equivalent weight}
+      resin_visc: {unit: mPa·s, lsl: 9000, usl: 14000, label: Resin viscosity}
+  silica_filler:
+    label: Spherical silica filler
+    suppliers: [SilicaWorks, NanoSphere]
+    properties:
+      d50:      {unit: µm, lsl: 2.4, usl: 3.6, label: Particle size D50}
+      moisture: {unit: '%', lsl: 0.0, usl: 0.10, label: Moisture}
+  hardener:
+    label: Amine hardener
+    suppliers: [AmineTech]
+    properties:
+      amine_value: {unit: mgKOH/g, lsl: 520, usl: 560, label: Amine value}
+
+# Lot ID prefix -> material (used when a lot is not yet in the lot master)
+lot_prefix:
+  UF: product
+  ER: epoxy_resin
+  SF: silica_filler
+  HD: hardener
+
+# Same measurement, different name depending on what was measured
+material_alias:
+  epoxy_resin: {viscosity: resin_visc}
+
+# Physical plausibility windows (canonical units) used by the instrument matcher
+# to infer units and reject wrong column mappings.
+plausible:
+  viscosity:   [100, 100000]
+  resin_visc:  [100, 100000]
+  tg:          [40, 260]
+  peak_temp:   [60, 260]
+  enthalpy:    [20, 800]
+  filler_pct:  [0, 95]
+  d50:         [0.05, 100]
+  moisture:    [0, 5]
+  eew:         [100, 400]
+  amine_value: [100, 1200]

@@ -1,0 +1,13 @@
+id: mes_genealogy
+label: MES batch genealogy export
+category: genealogy
+layout: table
+delimiter: ","
+decimal: "."
+header_row_contains: Batch
+signature: [Batch, Resin Lot, Filler Lot, Hardener Lot]
+columns:
+  product_lot: Batch
+  epoxy_resin: Resin Lot
+  silica_filler: Filler Lot
+  hardener: Hardener Lot

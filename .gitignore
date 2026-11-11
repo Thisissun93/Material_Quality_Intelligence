@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+data/*.sqlite
+data/demo_inbox/
+data/inbox/
+data/archive/
+data/jmp/
+config/history/
+.streamlit/secrets.toml
+.DS_Store

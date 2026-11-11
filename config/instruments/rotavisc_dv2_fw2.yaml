@@ -1,0 +1,13 @@
+id: rotavisc_dv2_fw2
+label: RotaVisc DV-2 · firmware 2.x (EU locale)
+category: viscometer
+layout: table
+delimiter: ";"
+decimal: ","
+header_row_contains: Probe
+signature: [RotaVisc DV-2, "Firmware;2"]
+columns:
+  lot_id: Probe
+  operator: Bediener
+  measured_at: Datum
+  viscosity: Visc[mPa.s]

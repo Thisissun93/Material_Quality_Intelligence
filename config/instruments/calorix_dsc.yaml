@@ -1,0 +1,15 @@
+id: calorix_dsc
+label: CaloriX DSC · table export (Kelvin)
+category: dsc
+layout: table
+delimiter: ";"
+decimal: "."
+header_row_contains: Sample
+signature: [CaloriX]
+columns:
+  lot_id: Sample
+  operator: User
+  measured_at: Date
+  peak_temp: Peak/K
+  enthalpy: Integral normalized/Jg^-1
+  tg: Tg Midpoint/K

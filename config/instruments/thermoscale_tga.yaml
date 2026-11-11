@@ -1,0 +1,13 @@
+id: thermoscale_tga
+label: ThermoScale TGA · residue export
+category: tga
+layout: table
+delimiter: ","
+decimal: "."
+header_row_contains: Residue
+signature: [ThermoScale TGA]
+columns:
+  lot_id: Sample
+  operator: Operator
+  measured_at: Date
+  filler_pct: Residue (%)

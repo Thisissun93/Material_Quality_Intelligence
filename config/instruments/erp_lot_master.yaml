@@ -1,0 +1,13 @@
+id: erp_lot_master
+label: ERP lot master export
+category: master
+layout: table
+delimiter: ","
+decimal: "."
+header_row_contains: Lot No
+signature: [Lot No, Material Code, Vendor]
+columns:
+  lot_id: Lot No
+  material: Material Code
+  supplier: Vendor
+  made_at: Date

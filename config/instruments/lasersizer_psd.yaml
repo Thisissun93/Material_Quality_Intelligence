@@ -1,0 +1,13 @@
+id: lasersizer_psd
+label: LaserSizer particle size analyzer
+category: particle_size
+layout: table
+delimiter: ","
+decimal: "."
+header_row_contains: Sample Name
+signature: [LaserSizer]
+columns:
+  lot_id: Sample Name
+  operator: Analyst
+  measured_at: Measurement Date
+  d50: D50 (µm)

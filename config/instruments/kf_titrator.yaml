@@ -1,0 +1,13 @@
+id: kf_titrator
+label: Karl Fischer titrator
+category: moisture
+layout: table
+delimiter: ","
+decimal: "."
+header_row_contains: Water content
+signature: [KF Coulometric]
+columns:
+  lot_id: Sample
+  operator: User
+  measured_at: Date
+  moisture: Water content [ppm]

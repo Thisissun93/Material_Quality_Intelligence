@@ -1,0 +1,13 @@
+id: rotavisc_dv2_fw3
+label: RotaVisc DV-2 · firmware 3.x
+category: viscometer
+layout: table
+delimiter: ","
+decimal: "."
+header_row_contains: Sample ID
+signature: [RotaVisc DV-2, "Firmware,3"]
+columns:
+  lot_id: Sample ID
+  operator: Operator
+  measured_at: Timestamp
+  viscosity: Viscosity (cP)

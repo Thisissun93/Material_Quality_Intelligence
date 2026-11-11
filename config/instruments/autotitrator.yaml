@@ -1,0 +1,16 @@
+id: autotitrator
+label: AutoTitrator · multi-method export
+category: titrator
+layout: long
+delimiter: ","
+decimal: "."
+header_row_contains: Method
+signature: [AutoTitrator]
+columns:
+  lot_id: Sample ID
+  operator: Analyst
+  measured_at: End Time
+property_column: Method
+value_column: Result
+unit_column: Unit
+property_map: {EEW: eew, AMINE: amine_value}

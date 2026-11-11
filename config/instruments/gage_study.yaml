@@ -1,0 +1,13 @@
+id: gage_study
+label: Gage R&R study sheet
+category: msa
+layout: table
+delimiter: ","
+decimal: "."
+header_row_contains: Part
+signature: [Gage R&R Study]
+columns:
+  part: Part
+  operator: Operator
+  replicate: Trial
+  viscosity: Viscosity (cP)

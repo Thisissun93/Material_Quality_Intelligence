@@ -1,0 +1,14 @@
+streamlit>=1.50
+pandas>=2.2
+numpy>=1.26
+scipy>=1.13
+statsmodels>=0.14
+scikit-learn>=1.5
+plotly>=5.22
+rapidfuzz>=3.9
+watchdog>=4.0
+pdfplumber>=0.11
+reportlab>=4.2
+PyYAML>=6.0
+markdown-it-py>=3.0
+pytest>=8.0

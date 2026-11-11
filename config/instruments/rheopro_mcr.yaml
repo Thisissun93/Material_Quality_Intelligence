@@ -1,0 +1,14 @@
+id: rheopro_mcr
+label: RheoPro MCR rotational rheometer
+category: rheometer
+layout: table
+delimiter: "\t"
+decimal: "."
+header_row_contains: Shear Rate
+signature: [RheoPro, MCR]
+columns:
+  lot_id: Sample
+  operator: User
+  measured_at: Date/Time
+  viscosity: Viscosity [Pa·s]
+filter: {column: "Shear Rate [1/s]", equals: 10}
