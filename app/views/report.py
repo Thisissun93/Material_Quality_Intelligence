@@ -1,7 +1,7 @@
 import streamlit as st
 
 import ui
-from mqi import report
+from mqi import qms, report
 from mqi.insight import eightd, llm
 
 
@@ -14,12 +14,24 @@ def render():
     lang = ui.lang()
     ko = lang == "ko"
     c1, c2 = st.columns([1, 3.2])
+    cc = qms.complaints(b.dbpath)
+    spc_src = "SPC 경보 (사내)" if ko else "SPC warning (internal)"
+    srcs = [spc_src] + cc["no"].tolist()
+    pre = st.session_state.pop("8d_source", None)
+    if pre in srcs:
+        st.session_state["8d_src"] = pre
+    src = c1.selectbox("출발점" if ko else "Trigger", srcs, key="8d_src",
+                       format_func=lambda v: v if v == spc_src else
+                       f"{v} · {cc.set_index('no').loc[v, 'customer']}")
+    complaint = None if src == spc_src else qms.complaint(src, b.dbpath)
     props = [p for p in b.spc if b.spc[p]["first"]["EWMA"] is not None] or list(b.spc)
-    prop = c1.selectbox(ui.t("property"), props, format_func=ui.prop_label)
+    if complaint and complaint["property"] in b.spc:
+        props = [complaint["property"]] + [p for p in props if p != complaint["property"]]
+    prop = c1.selectbox(ui.t("property"), props, format_func=ui.prop_label, key=f"8d_prop_{src}")
 
-    r = eightd.build(b, prop, lang)
+    r = eightd.build(b, prop, lang, complaint)
     base = eightd.markdown(r)
-    key_txt = f"8d_{prop}_{lang}"
+    key_txt = f"8d_{r.no}_{lang}"
     if key_txt not in st.session_state:
         st.session_state[key_txt] = base
 
@@ -48,6 +60,12 @@ def render():
         with view:
             st.html(eightd.fragment(text))
 
+    reg = qms.actions(r.no, b.dbpath)
+    if c1.button(("조치 등록 → 조치·클레임" if reg.empty else f"조치 등록됨 ({len(reg)}) · 갱신") if ko else
+                 ("Register actions" if reg.empty else f"Registered ({len(reg)}) · update"), width="stretch"):
+        n = qms.register(r.no, eightd.register_rows(r), b.dbpath)
+        st.toast((f"{n}건 등록" if ko else f"{n} added") if n else ("변경 없음" if ko else "Nothing new"))
+        st.rerun()
     c1.divider()
     c1.download_button("8D · HTML (A4, PDF 인쇄)" if ko else "8D · HTML (A4, print to PDF)",
                        eightd.html(text), file_name=f"8D_{prop}.html", mime="text/html",

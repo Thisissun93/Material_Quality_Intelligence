@@ -1,0 +1,16 @@
+id: change_log
+label: 4M change log (QMS export)
+category: changes
+layout: table
+delimiter: ","
+decimal: "."
+header_row_contains: Change No
+signature: [Change No, 4M, Item, Description, Notified]
+columns:
+  change_no: Change No
+  date: Date
+  category: 4M
+  item: Item
+  description: Description
+  owner: Owner
+  notified: Notified

@@ -18,7 +18,8 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from .. import config, db, engine
+from .. import config, db, engine, qms
+from ..analytics import changes as chg
 from .rules import lab, num, snum
 
 FUNCS = {
@@ -31,6 +32,7 @@ FUNCS = {
 @dataclass
 class EightD:
     lang: str
+    no: str
     header: dict
     status: list
     d0: dict
@@ -43,6 +45,8 @@ class EightD:
     d7: dict
     d8: list
     notes: list = field(default_factory=list)
+    changes: list = field(default_factory=list)
+    complaint: dict | None = None
 
 
 def _L(lang, ko, en):
@@ -90,7 +94,8 @@ def _limit_for(b: engine.Bundle, prop: str, feat: str) -> float | None:
     return float(grid[edge])
 
 
-def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD:
+def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko", complaint: dict | None = None) -> EightD:
+    """complaint: a row from qms.complaints() → customer-complaint 8D instead of an internal one."""
     L = lambda ko, en: _L(lang, ko, en)  # noqa: E731
     s = config.specs()["product"]
     spec = s["properties"][prop]
@@ -138,10 +143,20 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD
     if instrument:
         title = L(f"{s['id']} {lab(prop, 'ko')} 측정값 이동 (측정 장비 교체)",
                   f"{s['id']} {lab(prop, 'en')} reading shift (instrument change)")
+    cc = complaint
+    if cc:
+        no = f"8D-{cc['no']}"
+        title = L(f"고객 클레임 {cc['no']}: {cc['customer']} · {cc['symptom']}",
+                  f"Customer complaint {cc['no']}: {cc['customer']} · {cc['symptom']}")
+        cl = b.product[b.product["lot_id"] == cc["lot_id"]]
+        cl_v = float(cl[prop].iloc[0]) if len(cl) else np.nan
+        cl_pct = float((x < cl_v).mean() * 100) if len(cl) else np.nan
     header = {
         L("8D 번호", "8D No."): no, L("제목", "Title"): title,
         L("제품 / 규격", "Product / spec"): f"{s['name']} · {lab(prop, lang)} {spec.get('lsl')}–{spec.get('usl')} {unit}",
-        L("유형", "Type"): L("사내 SPC 조기경보 (고객 클레임 전)", "Internal SPC early warning (before customer complaint)"),
+        L("유형", "Type"): (L(f"고객 클레임 ({cc['customer']}, 접수 {cc['received']}, 심각도 {cc['severity']})",
+                              f"Customer complaint ({cc['customer']}, received {cc['received']}, severity {cc['severity']})") if cc else
+                            L("사내 SPC 조기경보 (고객 클레임 전)", "Internal SPC early warning (before customer complaint)")),
         L("발행일", "Issued"): date.today().isoformat(), L("개정", "Revision"): "Rev.0",
         L("챔피언 / 팀장", "Champion / leader"): f"{_f('champion', lang)} / {_f('leader', lang)}",
     }
@@ -164,12 +179,24 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD
         f"규격 이탈은 {oos}건이지만 상한 10% 이내 근접 로트 {near}개. Ppk {cap.ppk:.2f} (목표 1.33).",
         f"From {alarm_lot}, mean {lab(prop, 'en')} moved {num(base.mean())} → {num(recent.mean())} {unit}. "
         f"{oos} out of spec, {near} lots within 10% of USL. Ppk {cap.ppk:.2f} (target 1.33)."),
+        "era0": None,
         "era": L("보관 샘플을 기존 장비로 재측정해 실제 변화 여부 확인 (판정 전 출하 판정 보류)",
                  "Re-test retained samples on the old instrument before further release decisions") if instrument else
                L("영향 로트 출하 보류 및 보관 샘플 재측정 지시 (D3에서 범위 확정)",
                  "Hold shipment of affected lots and re-test retained samples (scope fixed in D3)"),
         "why_8d": L("원인 미상 · 다부서 협업 필요 · 고객 영향 가능성 → 8D 착수",
                     "Cause unknown, cross-functional, possible customer impact → 8D opened")}
+
+    if cc:
+        d0["symptom"] = L(
+            f"고객 표현: \"{cc['symptom']}\" (로트 {cc['lot_id']}, {num(cc['qty'])} {cc['unit']}). "
+            f"출하 시 {lab(prop, 'ko')} {num(cl_v)} {unit} (규격 내, 전체 로트 중 {cl_pct:.0f} 백분위). ",
+            f"Customer: \"{cc['symptom']}\" (lot {cc['lot_id']}, {num(cc['qty'])} {cc['unit']}). "
+            f"Released at {lab(prop, 'en')} {num(cl_v)} {unit} (in spec, {cl_pct:.0f}th percentile of all lots). ") + d0["symptom"]
+        d0["era"] = L("24시간 내: 고객 재고 동일 로트 사용 중지 요청 · 대체품 출하 · 보관 샘플 재측정",
+                      "Within 24 h: ask customer to stop using the lot, ship replacement, re-test retained sample")
+        d0["why_8d"] = L("고객 클레임 → 8D 회신 의무 (D3 24시간, D4 2주)", "Customer complaint → 8D response due (D3 24 h, D4 2 weeks)")
+    del d0["era0"]
 
     # ---------------- D1
     d1 = [(_f("champion", lang), L("챔피언 · 자원 승인", "Champion · resources")),
@@ -192,12 +219,20 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD
                  L(f"{lab(prop, 'ko')} 평균 상승, 규격 상한 접근", f"{lab(prop, 'en')} mean rising toward USL")),
         ("Where", L("전 생산 라인 제품 로트 (출하검사 시험실 측정)", "All production lots (release testing lab)")),
         ("When", L(f"{alarm_date} 이후 지속, 최근 10로트 평균 {num(x.tail(10).mean())}", f"Since {alarm_date}, ongoing; last 10 lots {num(x.tail(10).mean())}")),
-        ("Who", L("사내 SPC 조기경보(EWMA/Nelson)로 품질팀이 인지", "Detected by QA through SPC early warning (EWMA/Nelson)")),
+        ("Who", L(f"고객 {cc['customer']} 수입/공정에서 발견, {cc['received']} 접수" if cc else "", f"Found by {cc['customer']}, received {cc['received']}" if cc else "")
+                if cc else L("사내 SPC 조기경보(EWMA/Nelson)로 품질팀이 인지", "Detected by QA through SPC early warning (EWMA/Nelson)")),
         ("How", L(f"기준 대비 {snum(recent.mean() - base.mean())} {unit} 단계적 상승, 3σ보다 {first['3σ (rule 1)'] - detect_i if first['3σ (rule 1)'] and detect_i is not None else '-'}로트 먼저 감지",
                   f"Stepwise rise of {snum(recent.mean() - base.mean())} {unit}; caught {first['3σ (rule 1)'] - detect_i if first['3σ (rule 1)'] and detect_i is not None else '-'} lots before 3σ")),
         ("How many", L(f"영향 {len(after)}로트 / 규격 이탈 {oos} / 상한 근접 {near}", f"{len(after)} lots affected / {oos} OOS / {near} near USL")),
     ]
+    if cc:
+        w5h2.insert(0, ("Customer", L(f"{cc['customer']} · 로트 {cc['lot_id']} · {num(cc['qty'])} {cc['unit']} · {cc['symptom']}",
+                                      f"{cc['customer']} · lot {cc['lot_id']} · {num(cc['qty'])} {cc['unit']} · {cc['symptom']}")))
     isnot = []
+    if cc and len(cl):
+        isnot.append((L("어느 로트", "Which lot"), f"{cc['lot_id']}: {num(cl_v)}",
+                      L(f"기준 구간 평균 {num(base.mean())}", f"baseline mean {num(base.mean())}"),
+                      L(f"규격 내, {cl_pct:.0f} 백분위 → 고객 공정 허용 범위가 출하 규격보다 좁을 가능성", f"In spec, {cl_pct:.0f}th percentile → customer window may be tighter than the spec")))
     other = [p for p in b.cap if p != prop]
     stable = [p for p in other if b.spc[p]["first"]["EWMA"] is None and b.spc[p]["first"]["CUSUM"] is None]
     isnot.append((L("무엇", "What"), L(f"{lab(prop, 'ko')}", f"{lab(prop, 'en')}"),
@@ -217,6 +252,18 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD
     isnot.append((L("언제", "When"), L(f"{alarm_date} 이후", f"after {alarm_date}"),
                   L(f"기준 구간 (처음 {b.baseline}로트)", f"baseline (first {b.baseline} lots)"),
                   L("특정 시점부터 시작 → 변경점(4M) 추적", "Starts at a point in time → trace 4M changes")))
+    near_c = chg.changes_near(b, prop, alarm_date)
+    sd0 = base.std()
+    clist = []
+    for _, c in near_c.iterrows():
+        hit = (not pd.isna(c["p"])) and c["p"] < 0.05 and abs(c["resid_step"]) > 0.5 * sd0
+        ev = f"{snum(c['resid_step'])} (p={c['p']:.2f})" if not pd.isna(c["p"]) else "-"
+        if c["category"] == "Measurement" and sh and abs((pd.to_datetime(sh["since"]) - c["date"]).days) <= 3:
+            hit = sh["p"] < 0.01 and abs(sh["diff"]) > 0.5 * sh["sd"]
+            ev = f"ANCOVA {snum(sh['diff'])} (p={sh['p']:.1e})"
+        clist.append((c["change_no"], str(c["date"])[:10], c["category"], f"{c['item']}: {c['description']}", ev,
+                      L("원인 후보", "Candidate") if hit else L("제외", "Excluded")))
+    sup_changed = bool(len(near_c) and sup and near_c["item"].str.contains(sup, case=False).any())
     m_op = db.read("SELECT lot_id, operator, value FROM measurements WHERE material='product' AND property=?",
                    (prop,), b.dbpath)
     m_op = m_op[m_op["lot_id"].isin(after["lot_id"])] if len(after) else m_op
@@ -265,6 +312,12 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD
           "verify": L("격리 이후 출하 로트 전수 재측정, 결과 규격 내 확인 시 해제", "100% re-test of every lot released after hold"),
           "exit": L("D6 유효성 검증 완료 시 (연속 25로트 Ppk ≥ 1.33) 봉쇄 해제", "Lift when D6 validation passes (25 lots Ppk ≥ 1.33)")}
 
+    if cc:
+        d3["rows"].insert(0, (L(f"고객 재고 ({cc['customer']})", f"Customer stock ({cc['customer']})"),
+                              f"{num(cc['qty'])} {cc['unit']} ({cc['lot_id']})",
+                              L("사용 중지 · 회수 또는 선별 · 대체품 긴급 출하", "Stop use · return or sort · ship replacement"),
+                              _f("leader", lang), _d(1)))
+
     # ---------------- D4
     r2 = b.models[prop].r2 if prop in b.models else float("nan")
     limit = _limit_for(b, prop, drv) if drv else None
@@ -298,6 +351,8 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD
             nd_trc += L(f" · {u['supplier']} CoA가 실제보다 높게 기재되어 이동을 가림 ({u['drift_since']}부터 차이 확대)",
                         f" · {u['supplier']} CoA overstated the value and masked the drift (gap growing since {u['drift_since']})")
         nd_mrc = L("CoA 신뢰도 정기 검증과 원료 SPC가 수입검사 기준서에 없음", "No periodic CoA verification or raw-material SPC in the incoming inspection standard")
+        if sup and not sup_changed:
+            occ_mrc += L(f" · {sup}의 공정 변경이 4M 변경 이력에 없음 (사전 통보 없음)", f" · {sup}'s process change never reached the 4M change log (no notification)")
         why_o = [L(f"{lab(prop, 'ko')}가 올라감", f"{lab(prop, 'en')} went up"),
                  (L(f"필러 {lab(drv, 'ko')}가 작아져 비표면적·입자 간 마찰 증가 (모델 영향 1순위, R²={r2:.2f})",
                     f"Smaller filler {lab(drv, 'en')} raises surface area and particle friction (top model driver, R²={r2:.2f})")
@@ -328,10 +383,25 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD
                L("모든 측정자에서 동일 경향", "Same trend for all operators"), L("제외", "Excluded")))
     m6.append(("Method", L("장비 변경 시 상관성 평가 절차 없음", "No correlation procedure at instrument change"),
                L("변경관리 대상 아님", "Outside change control"), L("확인 (유출 원인)", "Verified (escape)")) if instrument else
-              ("Method", L("수입검사 합/부 판정만 수행", "Incoming check is pass/fail only"),
+              (L("Method (검사)", "Method (inspection)"), L("수입검사 합/부 판정만 수행", "Incoming check is pass/fail only"),
                L("규격 내 이동 미관리", "In-spec drift not tracked"), L("확인 (유출 원인)", "Verified (escape)")))
-    m6.append(("Machine", L("믹서·탈포 조건 변화", "Mixer / degassing settings"),
-               L("설비 데이터 없음 · 공정 조건 기록 확인 필요", "No equipment data · check batch records"), L("미검증", "Not verified")))
+    ps = chg.process_screen(b, prop, alarm_i)
+    if len(ps):
+        mach = ps[ps["param"].isin(["mixer", "vacuum", "degas_temp"])]
+        meth = ps[ps["param"].isin(["mix_time", "batch_kg"])]
+
+        def _ev(d):
+            return " · ".join(f"{chg.PARAMS[r.param][0 if lang == 'ko' else 1]} p={r.p_resid:.2f}" for r in d.itertuples())
+
+        m6.append(("Machine", L("믹서(M1/M2)·탈포 진공도·온도", "Mixer (M1/M2), vacuum, degas temp"),
+                   L("MES 공정 기록 vs 원료로 설명 안 되는 편차: ", "MES record vs unexplained variation: ") + _ev(mach),
+                   L("확인", "Verified") if mach["linked"].any() else L("제외", "Excluded")))
+        m6.append((L("Method (공정)", "Method (process)"), L("믹싱 시간·배치 크기", "Mix time, batch size"),
+                   L("MES 공정 기록: ", "MES record: ") + _ev(meth),
+                   L("확인", "Verified") if meth["linked"].any() else L("제외", "Excluded")))
+    else:
+        m6.append(("Machine", L("믹서·탈포 조건 변화", "Mixer / degassing settings"),
+                   L("설비 데이터 없음 · 공정 조건 기록 확인 필요", "No equipment data · check batch records"), L("미검증", "Not verified")))
     m6.append(("Environment", L("시험실 온도(25℃) 관리", "Lab temperature (25 °C)"),
                L("측정 온도 25.0℃ 기록 일정", "Logged 25.0 °C throughout"), L("제외", "Excluded")))
     verify = []
@@ -375,7 +445,11 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD
               (L("미검출", "Non-detection"), L("공급사별 원료 EWMA 관리도 + 월 1회 CoA 신뢰도 검증, 신뢰 불가 시 Skip-lot 중지",
                                               "Supplier-level EWMA on raw data + monthly CoA trust check; no skip-lot when untrusted"),
                L("규격 내 이동 3로트 이내 경보", "Alarm within 3 lots of an in-spec drift"), _f("qc", lang), _d(14))]
-    d6 = {"rows": [(a, act, owner, due, L("계획", "Planned")) for a, act, _, owner, due in d5],
+    reg = qms.actions(no, b.dbpath)
+    st_of = dict(zip(reg["action"], reg["status"])) if len(reg) else {}
+    sl = (lambda v: qms.STATUS_KO.get(v, v)) if lang == "ko" else (lambda v: v)
+    d6 = {"rows": [(a, act, owner, due, sl(st_of.get(act, "Open")) if st_of else L("미등록", "Not registered"))
+                   for a, act, _, owner, due in d5],
           "criteria": [L("보정 후 기준 구간과 평균 차이 ±0.5 ℃ 이내", "After correction, mean within ±0.5 °C of baseline")] if instrument else [L(f"조치 후 연속 25로트 {lab(prop, 'ko')} Ppk ≥ 1.33", f"25 consecutive lots after action: {lab(prop, 'en')} Ppk ≥ 1.33"),
                        L("EWMA·CUSUM 경보 없음", "No EWMA / CUSUM alarm"),
                        L("CoA-자사 차이 ±(규격 반폭의 10%) 이내", "CoA vs in-house within ±10% of half-spec")]}
@@ -414,7 +488,25 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko") -> EightD
 
     notes = [L("D0–D4는 데이터로 작성, D5–D8은 제안 (담당은 기능 단위, 일자는 목표일).",
                "D0–D4 written from data; D5–D8 are proposals (owners are functions, dates are targets).")]
-    return EightD(lang, header, status, d0, d1, {"stmt": stmt, "w5h2": w5h2, "isnot": isnot}, d3, d4, d5, d6, d7, d8, notes)
+    if st_of:
+        done = sum(st_of.get(a[1]) in ("Done", "Verified") for a in d5)
+        ver = sum(st_of.get(a[1]) == "Verified" for a in d5)
+        status[5] = ("D5", L(f"실행 {done}/{len(d5)}", f"{done}/{len(d5)} done"), status[5][2])
+        status[6] = ("D6", L(f"유효성 확인 {ver}/{len(d5)}", f"{ver}/{len(d5)} verified"), status[6][2])
+        c3 = [st_of.get(r[2]) for r in d3["rows"]]
+        if c3 and all(v in ("Done", "Verified") for v in c3):
+            status[3] = ("D3", L("완료", "Done"), status[3][2])
+    if cc:
+        status[3] = (status[3][0], status[3][1], _d(1))
+    return EightD(lang, no, header, status, d0, d1, {"stmt": stmt, "w5h2": w5h2, "isnot": isnot}, d3, d4, d5, d6, d7, d8, notes, clist, cc)
+
+
+def register_rows(r: EightD) -> list[dict]:
+    """Containment and corrective actions as rows for the action register."""
+    out = [dict(step="D3", kind=row[0], action=row[2], verification=r.d3["verify"], owner=row[3], due=row[4])
+           for row in r.d3["rows"]]
+    out += [dict(step="D5", kind=row[0], action=row[1], verification=row[2], owner=row[3], due=row[4]) for row in r.d5]
+    return out
 
 
 # ============================================================ renderers
@@ -438,6 +530,10 @@ def markdown(r: EightD) -> str:
     o += [f"## D2 {L('문제 기술', 'Problem description')}", f"**{L('문제 정의', 'Problem statement')}**: {r.d2['stmt']}", "",
           _t(r.d2["w5h2"], ["5W2H", L("내용", "Detail")]),
           f"**IS / IS NOT**", "", _t(r.d2["isnot"], ["", "IS", "IS NOT", L("시사점", "Therefore")])]
+    if r.changes:
+        o += [f"**{L('변경점(4M) 검토 · 발생 전 45일 ~ 후 10일', '4M changes · 45 days before to 10 days after')}**", "",
+              _t(r.changes, ["No.", L("일자", "Date"), "4M", L("내용", "Change"),
+                             L("원료 보정 후 단차", "Step after raw-material correction"), L("판정", "Verdict")])]
     o += [f"## D3 {L('봉쇄 조치', 'Containment')}",
           _t(r.d3["rows"], [L("위치", "Location"), L("수량", "Quantity"), L("조치", "Action"), L("담당", "Owner"), L("목표일", "Due")]),
           f"- **{L('유효성 확인', 'Effectiveness')}**: {r.d3['verify']}", f"- **{L('해제 기준', 'Exit criteria')}**: {r.d3['exit']}", ""]
@@ -555,6 +651,10 @@ def xlsx(r: EightD) -> bytes:
     line(["", "IS", "IS NOT", L("시사점", "Therefore")], bold=True, fill=hd, merge_last=True)
     for v in r.d2["isnot"]:
         line(list(v), merge_last=True)
+    if r.changes:
+        line(["4M No.", L("일자 · 4M", "Date · 4M"), L("내용", "Change"), L("단차", "Step"), L("판정", "Verdict")], bold=True, fill=hd, merge_last=True)
+        for c in r.changes:
+            line([c[0], f"{c[1]} · {c[2]}", c[3], c[4], c[5]], merge_last=True)
     section(f"D3 {L('봉쇄 조치', 'Containment')}")
     line([L("위치", "Location"), L("수량", "Quantity"), L("조치", "Action"), L("담당", "Owner"), L("목표일", "Due")], bold=True, fill=hd, merge_last=True)
     for v in r.d3["rows"]:

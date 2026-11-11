@@ -5,7 +5,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import ui
-from mqi import config
+from mqi import config, db
 from mqi.analytics.spc import NELSON
 
 
@@ -21,8 +21,11 @@ def render():
 
     with tab1:
         props = list(b.spc)
-        p = st.segmented_control(ui.t("property"), props, default=props[0], format_func=ui.prop_label,
-                                 label_visibility="collapsed") or props[0]
+        cc1, cc2 = st.columns([4, 1])
+        with cc1:
+            p = st.segmented_control(ui.t("property"), props, default=props[0], format_func=ui.prop_label,
+                                     label_visibility="collapsed") or props[0]
+        cc2.toggle("4M 변경점" if ui.lang() == "ko" else "4M changes", value=True, key="spc_changes")
         s, x = b.spc[p], b.product[p].values
         lim = s["limits"]
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.5, 0.25, 0.25])
@@ -49,6 +52,17 @@ def render():
         fig.add_hline(h, line_dash="dot", line_color=ui.MUTED, row=3, col=1)
         fig.add_hline(-h, line_dash="dot", line_color=ui.MUTED, row=3, col=1)
         fig.add_vrect(x0=lots.iloc[0], x1=lots.iloc[b.baseline - 1], fillcolor="#f3f4f6", line_width=0, layer="below")
+        show_chg = st.session_state.get("spc_changes", True)
+        chg = db.read("SELECT change_no, date, category, item FROM changes", (), b.dbpath) if show_chg else None
+        if chg is not None and len(chg):
+            made = pd.to_datetime(b.product["measured_at"]).values
+            for _, c in chg.iterrows():
+                k = np.searchsorted(made, np.datetime64(pd.to_datetime(c["date"])))
+                if 0 < k < len(lots):
+                    fig.add_vline(lots.iloc[k], line_dash="dot", line_color=ui.AMBER, line_width=1)
+                    fig.add_annotation(x=lots.iloc[k], y=1.0, yref="y domain", text=f"{c['category'][:4]} · {c['item']}",
+                                       showarrow=False, textangle=-90, xanchor="right", yanchor="top",
+                                       font=dict(size=9, color=ui.AMBER), row=1, col=1)
         fig.update_layout(template="plotly_white", height=560, margin=dict(l=10, r=10, t=20, b=10),
                           legend=dict(orientation="h", y=1.04), hovermode="x unified")
         fig.update_xaxes(showticklabels=False)

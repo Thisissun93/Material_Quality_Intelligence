@@ -65,21 +65,35 @@ def coa_trust(raw: pd.DataFrame, alpha: float | None = None, practical: float | 
     return pd.DataFrame(rows)
 
 
+def ppk_ci(ppk: float, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Approximate 95% CI for Ppk (Bissell form)."""
+    if n < 2 or not np.isfinite(ppk):
+        return (np.nan, np.nan)
+    se = np.sqrt(1 / (9 * n) + ppk ** 2 / (2 * (n - 1)))
+    return (ppk - z * se, ppk + z * se)
+
+
 def scorecard(raw: pd.DataFrame, trust: pd.DataFrame) -> pd.DataFrame:
-    """Per supplier: in-house capability, out-of-spec lots, CoA trust and the inspection level to use."""
+    """Per supplier: in-house capability with its uncertainty, out-of-spec lots, CoA trust, inspection level.
+
+    Small samples do not decide on their own: a low Ppk only tightens inspection when the upper
+    confidence bound is still below 1.0, and skip-lot needs the lower bound above 1.33.
+    With fewer than `min_lots` lots and nothing else wrong, the level is 'pending'.
+    """
     cfg = config.rules()["supplier"]
+    min_lots = cfg.get("min_lots", 10)
     specs = config.all_property_specs()
     w = paired(raw)
     rows = []
     for sup, g in w.groupby("supplier"):
-        ppks, oos, drift = {}, 0, []
+        ppks, ns, oos, drift = {}, {}, 0, []
         for prop, h in g.groupby("property"):
             s = specs.get(prop, {})
             x = h["inhouse"].dropna().values
             if len(x) < 4:
                 continue
             c = capability.analyze(x, s.get("lsl"), s.get("usl"))
-            ppks[prop] = c.ppk
+            ppks[prop], ns[prop] = c.ppk, len(x)
             lo = s.get("lsl") if s.get("lsl") is not None else -np.inf
             hi = s.get("usl") if s.get("usl") is not None else np.inf
             oos += int(((x < lo) | (x > hi)).sum())
@@ -87,18 +101,25 @@ def scorecard(raw: pd.DataFrame, trust: pd.DataFrame) -> pd.DataFrame:
             k = max(3, len(x) // 3)
             if len(x) >= 8 and stats.ttest_ind(x[-k:], x[:-k], equal_var=False).pvalue < 0.01:
                 drift.append(prop)
-        min_ppk = min(ppks.values()) if ppks else np.nan
+        worst = min(ppks, key=ppks.get) if ppks else None
+        min_ppk = ppks[worst] if worst else np.nan
+        ci = ppk_ci(min_ppk, ns[worst]) if worst else (np.nan, np.nan)
+        n_lots = g["lot_id"].nunique()
         t = trust[trust["supplier"] == sup]
         worst_trust = ("untrusted" if (t["trust"] == "untrusted").any()
                        else "verify" if (t["trust"] == "verify").any() else "trusted")
-        if worst_trust == "untrusted" or drift or oos or min_ppk < 1.0:
+        if worst_trust == "untrusted" or drift or oos or ci[1] < 1.0:
             level = "tightened"
-        elif worst_trust == "trusted" and min_ppk >= cfg["skip_lot_ok_ppk"]:
+        elif n_lots < min_lots:
+            level = "pending"
+        elif worst_trust == "trusted" and ci[0] >= 1.33 and min_ppk >= cfg["skip_lot_ok_ppk"]:
             level = "skip-lot"
         else:
             level = "normal"
-        rows.append(dict(supplier=sup, material=g["material"].iloc[0], lots=g["lot_id"].nunique(),
-                         min_ppk=min_ppk, worst_property=min(ppks, key=ppks.get) if ppks else None,
-                         oos_lots=oos, drifting=", ".join(drift) or "-", coa_trust=worst_trust,
-                         inspection=level))
-    return pd.DataFrame(rows).sort_values(["inspection", "min_ppk"], ascending=[False, True])
+        rows.append(dict(supplier=sup, material=g["material"].iloc[0], lots=n_lots,
+                         min_ppk=min_ppk, ppk_ci=f"{ci[0]:.2f}–{ci[1]:.2f}" if worst else "-",
+                         worst_property=worst, oos_lots=oos, drifting=", ".join(drift) or "-",
+                         coa_trust=worst_trust, inspection=level))
+    order = {"tightened": 0, "pending": 1, "normal": 2, "skip-lot": 3}
+    return (pd.DataFrame(rows).assign(_o=lambda d: d["inspection"].map(order))
+            .sort_values(["_o", "min_ppk"]).drop(columns="_o"))

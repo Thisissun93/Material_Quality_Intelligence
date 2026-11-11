@@ -25,8 +25,11 @@ from .. import config, units
 from .fingerprint import Fingerprint, fingerprint
 
 META = {"lot_id", "operator", "measured_at", "part", "replicate", "material", "supplier",
-        "made_at", "product_lot", "epoxy_resin", "silica_filler", "hardener"}
+        "made_at", "product_lot", "epoxy_resin", "silica_filler", "hardener",
+        "mixer", "mix_time", "vacuum", "degas_temp", "batch_kg", "change_no", "date", "category", "item",
+        "description", "owner", "notified"}
 
+TABLE_CATS = ("master", "genealogy", "msa", "process", "changes")
 AUTO_ACCEPT = 0.80
 MARGIN = 0.08
 
@@ -116,12 +119,12 @@ def rank(path: Path | str, profiles: list[dict] | None = None) -> tuple[Fingerpr
     for prof in profiles:
         s, detail = _structure_score(fp, prof)
         c = 0.0
-        if s >= 0.35 and prof.get("category") not in ("master", "genealogy", "msa"):
+        if s >= 0.35 and prof.get("category") not in TABLE_CATS:
             try:
                 c = _content_score(parse_with(fp, prof))
             except Exception:
                 c = 0.0
-        elif prof.get("category") in ("master", "genealogy", "msa"):
+        elif prof.get("category") in TABLE_CATS:
             c = 1.0 if s >= 0.6 else 0.0
         matches.append(Match(prof, s, c, detail))
     matches.sort(key=lambda m: m.confidence, reverse=True)

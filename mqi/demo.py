@@ -27,6 +27,7 @@ from reportlab.pdfgen import canvas
 from . import config, db
 
 GAGE_SEED = 1
+PROC_SEED = 5
 
 RNG = np.random.default_rng(20261111)
 OPS = ["Kim", "Lee", "Park"]
@@ -128,6 +129,27 @@ def write_files(t: dict, out: Path) -> None:
     g = g[["epoxy_resin", "silica_filler", "hardener"]].reset_index()
     g.columns = ["Batch", "Resin Lot", "Filler Lot", "Hardener Lot"]
     g[["Batch", "Resin Lot", "Filler Lot", "Hardener Lot"]].to_csv(out / "MES_genealogy.csv", index=False)
+
+    # MES process record (own random stream so the measured data stay identical)
+    prng = np.random.default_rng(PROC_SEED)
+    pr = []
+    for k, (_, r) in enumerate(t["product"].iterrows()):
+        mixer = "M1" if k % 3 != 2 else "M2"
+        pr.append([r.lot_id, mixer, f"{prng.normal(45, 1.5):.0f}", f"{prng.normal(5.0 if mixer == 'M1' else 5.4, 0.5):.1f}",
+                   f"{prng.normal(60, 0.8):.1f}", f"{prng.choice([200, 200, 400]):d}"])
+    pd.DataFrame(pr, columns=["Batch", "Mixer", "Mix Time (min)", "Vacuum (mbar)", "Degas Temp (C)",
+                              "Batch Size (kg)"]).to_csv(out / "MES_process_record.csv", index=False)
+
+    # QMS 4M change log. The supplier's process change is NOT in it: nobody was told.
+    pd.DataFrame([
+        ["CN-26-031", "2026-05-18", "Man", "QC lab", "New analyst (Park) qualified for viscosity testing", "QC", "Y"],
+        ["CN-26-038", "2026-06-15", "Method", "SOP-QC-012", "Viscosity SOP rev.C: spindle warm-up 5 → 10 min", "QC", "Y"],
+        ["CN-26-044", "2026-07-08", "Machine", "Mixer M2", "Planetary blade replaced after overhaul", "Production", "Y"],
+        ["CN-26-052", "2026-08-17", "Measurement", "DSC", "ThermaTech DSC replaced by CaloriX DSC", "QC", "Y"],
+        ["CN-26-057", "2026-09-02", "Material", "AmineTech hardener", "Packaging changed from drum to IBC", "Purchasing", "Y"],
+        ["CN-26-063", "2026-10-06", "Method", "Incoming inspection", "Sampling plan for resin lots updated", "QA", "Y"],
+    ], columns=["Change No", "Date", "4M", "Item", "Description", "Owner", "Notified"]).to_csv(
+        out / "QMS_4M_change_log.csv", index=False)
 
     # ---- product viscosity: three instruments
     p = p.copy()
@@ -384,7 +406,21 @@ def build(folder: Path | None = None, dbpath: Path | None = None, ingest: bool =
     if not ingest:
         return []
     db.reset(dbpath)
-    return process_folder(folder, dbpath)
+    res = process_folder(folder, dbpath)
+    seed_complaint(dbpath)
+    return res
+
+
+def seed_complaint(dbpath=None) -> str | None:
+    """One customer complaint on the highest-viscosity lot of the last month (in spec, near USL)."""
+    from . import qms
+    p = db.product_wide(path=dbpath)
+    if p.empty or "viscosity" not in p:
+        return None
+    lot = p.tail(20).sort_values("viscosity").iloc[-1]
+    d = min((pd.to_datetime(lot["measured_at"]) + pd.Timedelta(days=4)).date(), date.today()).isoformat()
+    return qms.add_complaint("Customer A (demo)", lot["lot_id"], "viscosity",
+                             "Slow dispense flow, incomplete fillet on large die", 120, "kg", "major", d, dbpath)
 
 
 if __name__ == "__main__":

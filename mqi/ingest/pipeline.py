@@ -65,6 +65,26 @@ def store_profile_result(fp, prof: dict, file: str, dbpath=None) -> int:
         with db.connect(dbpath) as con:
             con.executemany("INSERT OR REPLACE INTO genealogy VALUES (?,?,?)", t.values.tolist())
         return len(t)
+    if cat == "process":
+        t = parse_table(fp, prof)
+        rows = []
+        for _, r in t.iterrows():
+            for k in t.columns:
+                if k == "product_lot" or pd.isna(r[k]):
+                    continue
+                v = pd.to_numeric(str(r[k]).replace(",", "."), errors="coerce")
+                rows.append((r["product_lot"], k, None if pd.isna(v) else float(v), None if pd.notna(v) else str(r[k])))
+        with db.connect(dbpath) as con:
+            con.executemany("INSERT OR REPLACE INTO process VALUES (?,?,?,?)", rows)
+        return len(t)
+    if cat == "changes":
+        t = parse_table(fp, prof)
+        cols = ["change_no", "date", "category", "item", "description", "owner", "notified"]
+        t = t.reindex(columns=cols)
+        with db.connect(dbpath) as con:
+            con.executemany(f"INSERT OR REPLACE INTO changes VALUES ({','.join('?' * len(cols))})",
+                            t.astype(object).where(t.notna(), None).values.tolist())
+        return len(t)
     if cat == "msa":
         t = parse_table(fp, prof)
         prop = next(c for c in t.columns if c not in registry.META)

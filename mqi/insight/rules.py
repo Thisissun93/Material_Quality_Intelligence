@@ -198,6 +198,15 @@ def findings(b: engine.Bundle) -> list[Finding]:
                 f"Lowest Ppk {s['min_ppk']:.2f} ({lab(s['worst_property'], 'en')}), drifting: {s['drifting']}",
                 "공급사 공정능력 개선 계획 요청, 개선 전까지 전수 검사",
                 "Ask for a capability improvement plan; inspect every lot until it improves"))
+        for _, s_ in b.score[b.score["inspection"] == "pending"].iterrows():
+            out.append(_f(
+                f"pend_{s_['supplier']}", "Supplier", "low",
+                f"{s_['supplier']} 판정 보류 (로트 {s_['lots']}개)",
+                f"{s_['supplier']}: not enough lots to judge ({s_['lots']})",
+                f"Ppk {s_['min_ppk']:.2f}, 95% CI {s_['ppk_ci']} ({lab(s_['worst_property'], 'ko')})",
+                f"Ppk {s_['min_ppk']:.2f}, 95% CI {s_['ppk_ci']} ({lab(s_['worst_property'], 'en')})",
+                "보통 검사 유지, 로트 누적 후 재판정. 평균이 상한 쪽이면 공급사에 중심값 조정 요청",
+                "Keep normal inspection and re-judge with more lots; ask the supplier to centre the process"))
 
     # ---- release risk on what is in stock
     if b.matching is not None and len(b.matching):
@@ -216,4 +225,19 @@ def findings(b: engine.Bundle) -> list[Finding]:
                 f"Use {best['resin_lot']} + {best['filler_lot']} + {best['hardener_lot']} for the next batch"))
 
     out.sort(key=lambda f: (SEV[f.severity], f.area))
+    # ---- open complaints and overdue actions
+    from .. import qms
+    cc = qms.complaints(b.dbpath)
+    for _, c in cc[cc["status"] == "Open"].iterrows():
+        out.append(_f(
+            f"cc_{c['no']}", "Customer", "high",
+            f"고객 클레임 {c['no']} ({c['customer']}) 진행 중", f"Open customer complaint {c['no']} ({c['customer']})",
+            f"로트 {c['lot_id']} · {c['symptom']}", f"Lot {c['lot_id']} · {c['symptom']}",
+            "보고서에서 클레임 기준 8D 작성, 24시간 내 봉쇄(D3) 회신", "Open the complaint 8D on Reports; containment reply within 24 h"))
+    sm = qms.summary(b.dbpath)
+    if sm["overdue"]:
+        out.append(_f("act_overdue", "Actions", "medium", f"기한 지난 조치 {sm['overdue']}건",
+                      f"{sm['overdue']} actions past due", f"진행 중 {sm['open']} / 전체 {sm['total']}",
+                      f"{sm['open']} open of {sm['total']}", "조치·클레임 화면에서 담당·기한 재확인",
+                      "Review owners and dates on the Actions page"))
     return out

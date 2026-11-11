@@ -10,7 +10,7 @@ EXPECTED = {  # file prefix -> profile that must win
     "DV2_resin": "rotavisc_dv2_fw3", "DV2-legacy": "rotavisc_dv2_fw2", "DV2_": "rotavisc_dv2_fw3",
     "MCR_": "rheopro_mcr", "DSC_": "thermatech_dsc", "CaloriX_": "calorix_dsc", "TGA_": "thermoscale_tga",
     "PSD_": "lasersizer_psd", "KF_": "kf_titrator", "Titration_": "autotitrator", "ERP_": "erp_lot_master",
-    "MES_": "mes_genealogy", "GageRR": "gage_study", "CoA_": "coa_reader",
+    "MES_genealogy": "mes_genealogy", "MES_process": "mes_process", "QMS_4M": "change_log", "GageRR": "gage_study", "CoA_": "coa_reader",
 }
 
 

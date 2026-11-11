@@ -1,0 +1,15 @@
+id: mes_process
+label: MES batch process record
+category: process
+layout: table
+delimiter: ","
+decimal: "."
+header_row_contains: Batch
+signature: [Batch, Mixer, Mix Time, Vacuum, Degas Temp]
+columns:
+  product_lot: Batch
+  mixer: Mixer
+  mix_time: Mix Time (min)
+  vacuum: Vacuum (mbar)
+  degas_temp: Degas Temp (C)
+  batch_kg: Batch Size (kg)

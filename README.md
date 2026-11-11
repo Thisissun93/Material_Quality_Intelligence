@@ -19,6 +19,8 @@ https://materialqualityintelligence-dknsnjemfstfko4zluzplu.streamlit.app/
 | 장비 교체 영향을 공정 변화로 오인 | **공분산분석(ANCOVA)**으로 원료 영향을 뺀 순수 장비 편차만 분리 |
 | 보고서는 사람이 작성 | 데이터로 채운 **표준 8D(D0–D8)·SCAR** 자동 작성: 5W2H·IS/IS NOT, 발생/유출 원인 분리, 6M 검증, 원료 한계 재계산 (한/영, A4·Excel) |
 | 결과만 보여 줌 | 재고 원료 조합별 **다음 배치 이탈 확률**을 예측해 사용할 조합을 추천 |
+| 조치는 엑셀로 따로 관리 | 8D·SCAR 조치를 **담당·기한·상태**로 추적하고, 상태가 8D D5·D6에 자동 반영 |
+| 출하 성적서는 수기 작성 | 출하 판정(가능/보류/불가)을 통과한 로트만 **출하 CoA PDF** 발행 |
 
 ## 핵심 기능
 
@@ -47,9 +49,13 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 | MSA | 교차 Gage R&R (2원 ANOVA, AIAG), %StudyVar·%Tolerance·ndc, 치우친 측정자 식별 |
 | 공정능력 | Cp/Cpk(MR̄/d2), Pp/Ppk, Cpk 신뢰구간, 비정규 시 Box-Cox, 이동 Ppk |
 | SPC | I 관리도 + Nelson 1–8, EWMA, CUSUM, 방법별 첫 경보 시점 비교, Hotelling T² + 항목별 기여도 |
-| 공급사 | CoA 신뢰도(짝 t검정·Bland-Altman·차이 추세), 공급사 성적표, 검사 수준(강화/보통/Skip-lot) 추천 |
+| 공급사 | CoA 신뢰도(짝 t검정·Bland-Altman·차이 추세), 공급사 성적표(Ppk 95% 신뢰구간), 검사 수준(강화/보통/Skip-lot/판정 보류) 추천. 로트가 적으면 신뢰구간으로 판단해 성급한 강화 판정을 막음 |
 | 원료→제품 | 로트 이력 결합 → Ridge/GBM 교차검증 선택 → 원인 기여도, 다음 배치 시뮬레이터, 재고 조합 위험도 순위 |
 | 측정 장비 편차 | ANCOVA로 원료 영향을 통제한 장비 교체 Bias |
+| 공정 조건 | MES 배치 기록(믹서·진공도·탈포 온도·믹싱 시간·배치 크기)을 원료로 설명 안 되는 편차와 비교 → 8D 6M의 Machine·Method를 데이터로 판정 |
+| 4M 변경점 | QMS 변경 이력을 SPC 차트에 표시하고, 이동 시작 전후 변경점마다 원료 보정 후 단차를 검정. 원인 공급사의 변경이 이력에 없으면 "사전 통보 없음"을 시스템 원인으로 기록 |
+
+![spc](docs/img/spc.png)
 
 ### 3. 조치
 판단 기준은 `config/rules.yaml`에만 있습니다. 결과는 근거·조치가 붙은 우선순위 목록, 8D, 공급사 SCAR, HTML 보고서로 나옵니다.
@@ -68,6 +74,14 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 
 ![8d](docs/img/report_8d.png)
 
+| 화면 | 내용 |
+|---|---|
+| 조치·클레임 | 8D에서 "조치 등록"을 누르면 D3·D5 조치가 등록됨. 담당·기한·상태·메모를 표에서 바로 수정, 기한 초과 표시, Excel 내보내기. 고객 클레임을 등록하면 클레임 기준 8D(고객 재고 봉쇄, 24시간 회신)로 바로 이동 |
+| 출하 판정·성적서 | 최근 로트를 출하 가능 / 보류(규격 경계 5% 이내, T² 이상, 진행 중 클레임) / 불가(규격 이탈·미측정)로 판정. 가능 로트는 출하 CoA PDF 발행, 보류 로트는 QA 승인 전까지 HOLD 워터마크 초안만 |
+
+![actions](docs/img/actions.png)
+![shipping](docs/img/shipping.png)
+
 ## 데모 데이터에 심어 둔 문제와 앱이 찾은 결과
 
 | 심어 둔 문제 | 앱의 판단 |
@@ -77,8 +91,11 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 | 8월 DSC 교체, 새 장비가 Tg를 +2.2 ℃ 높게 측정 | 원료로 설명 안 됨 → ANCOVA로 +1.9 ℃ 장비 편차 분리 |
 | UF-2609-012: 단일 값은 정상, 조합만 비정상 | T² 경보 + 단일 항목 정상으로 "숨은 이상" 분류 |
 | Gage R&R에서 측정자 Park이 높게 측정 | 재현성 우세, Park +72 mPa·s 치우침 |
+| 4M 변경 이력에 7월 믹서 M2 정비, 8월 DSC 교체 기록 (NanoSphere 변경은 통보 없음) | 점도 8D: 믹서 정비 "제외", 공급사 변경 미통보를 시스템 원인으로 기록 · Tg 8D: DSC 교체 "원인 후보" |
+| KoPolymer는 8로트뿐, Ppk 0.77 | 신뢰구간 0.30–1.23 → "판정 보류(데이터 부족)", 강화 판정하지 않음 |
+| 고객 클레임 1건: 규격 내지만 점도 상위 로트 | 클레임 기준 8D, 해당 로트 출하 판정 "보류" |
 
-위 내용은 `tests/test_findings.py`가 매번 확인합니다.
+위 내용은 `tests/`의 테스트 39개가 매번 확인합니다.
 
 ## 실행
 
@@ -104,7 +121,7 @@ pytest -q                       # 29개 테스트
 
 ```mermaid
 flowchart LR
-  A[장비 출력 파일<br/>CoA PDF<br/>ERP·MES] --> W[폴더 감시 / 업로드]
+  A[장비 출력 파일<br/>CoA PDF<br/>ERP·MES·QMS] --> W[폴더 감시 / 업로드]
   W --> M{장비 프로파일<br/>검색·매칭·선택}
   M -- 자동 --> P[파싱 + 단위 정규화]
   M -- 새 형식 --> L[매핑 제안 → 확인 → 학습]
@@ -113,15 +130,19 @@ flowchart LR
   D --> E[분석 엔진<br/>MSA·Cpk·SPC·T²·공급사·예측·ANCOVA]
   E --> R[규칙 엔진<br/>config/rules.yaml]
   R --> O[우선 조치 · 8D · SCAR · HTML 보고서]
+  O --> T[조치 추적 · 클레임]
+  E --> S[출하 판정 · 출하 CoA]
 ```
 
 ```
 mqi/
   instruments/   fingerprint · registry(매칭·학습) · parse
   ingest/        pipeline · watcher · coa · coa_docs
-  analytics/     msa · capability · spc · supplier · genealogy
+  analytics/     msa · capability · spc · supplier · genealogy · changes(공정·4M)
   insight/       rules(판정) · eightd(8D) · drafts(SCAR) · llm(선택)
   engine.py      전체 분석 1회 실행
+  qms.py         조치 대장 · 고객 클레임
+  outgoing.py    출하 판정 · 출하 CoA
 app/             Streamlit (한국어/English)
 config/          specs · rules · vocabulary · instruments/*.yaml
 tests/
@@ -135,4 +156,4 @@ Taeyang Kim · [github.com/Thisissun93](https://github.com/Thisissun93)
 ---
 
 ### English summary
-An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, and a CoA document viewer. All data is synthetic; the test suite checks that every planted problem is found.
+An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. All data is synthetic; the test suite checks that every planted problem is found.

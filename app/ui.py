@@ -40,7 +40,7 @@ h3 {font-size:1.05rem !important; margin-top:0.6rem;}
 .kpi .l {color:#6b7280;font-size:0.82rem}
 .kpi .v {font-size:1.55rem;font-weight:600;line-height:1.25}
 .kpi .s {color:#6b7280;font-size:0.78rem}
-.kpi .v.bad {color:#b91c1c} .kpi .v.warn {color:#b45309}
+.kpi .v.bad {color:#b91c1c} .kpi .v.warn {color:#b45309} .kpi .v.good {color:#047857}
 </style>
 """
 
@@ -112,10 +112,10 @@ def kpi(col, label: str, value, sub: str | None = None, tone: str = ""):
 
 
 VALUE_KO = {"untrusted": "신뢰 불가", "verify": "확인 필요", "trusted": "신뢰", "tightened": "강화",
-            "normal": "보통", "skip-lot": "Skip-lot", "epoxy_resin": "에폭시 수지", "silica_filler": "실리카 필러",
+            "normal": "보통", "skip-lot": "Skip-lot", "pending": "판정 보류(데이터 부족)", "epoxy_resin": "에폭시 수지", "silica_filler": "실리카 필러",
             "hardener": "아민 경화제", "product": "제품"}
 
-COL_KO = {"supplier": "공급사", "material": "자재", "lots": "로트 수", "min_ppk": "최저 Ppk",
+COL_KO = {"supplier": "공급사", "material": "자재", "lots": "로트 수", "min_ppk": "최저 Ppk", "ppk_ci": "Ppk 95% CI",
           "worst_property": "취약 항목", "oos_lots": "규격 이탈", "drifting": "이동 항목", "coa_trust": "CoA 신뢰도",
           "inspection": "검사 수준", "property": "항목", "n": "n", "bias": "평균 차이(CoA−자사)",
           "bias_pct_of_halfspec": "차이/½규격 %", "p_value": "p", "corr": "상관", "loa": "±LoA",
@@ -123,13 +123,13 @@ COL_KO = {"supplier": "공급사", "material": "자재", "lots": "로트 수", "
           "hardener_lot": "경화제 로트", "viscosity": "점도", "tg": "Tg", "risk": "이탈 확률"}
 
 
-COL_EN = {"supplier": "Supplier", "material": "Material", "lots": "Lots", "min_ppk": "Min Ppk",
+COL_EN = {"supplier": "Supplier", "material": "Material", "lots": "Lots", "min_ppk": "Min Ppk", "ppk_ci": "Ppk 95% CI",
           "worst_property": "Weakest", "oos_lots": "OOS", "drifting": "Drifting", "coa_trust": "CoA trust",
           "inspection": "Inspection", "property": "Property", "bias": "Bias (CoA−in-house)",
           "bias_pct_of_halfspec": "Bias / ½spec %", "p_value": "p", "corr": "Corr", "loa": "±LoA",
           "drift_since": "Gap growing since", "trust": "Trust", "resin_lot": "Resin lot", "filler_lot": "Filler lot",
           "hardener_lot": "Hardener lot", "viscosity": "Viscosity", "tg": "Tg", "risk": "OOS risk"}
-VALUE_EN = {"epoxy_resin": "Epoxy resin", "silica_filler": "Silica filler", "hardener": "Amine hardener"}
+VALUE_EN = {"pending": "Pending (few lots)", "epoxy_resin": "Epoxy resin", "silica_filler": "Silica filler", "hardener": "Amine hardener"}
 
 
 def localize(df):

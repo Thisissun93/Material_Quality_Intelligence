@@ -30,6 +30,22 @@ CREATE TABLE IF NOT EXISTS msa (
     study TEXT, property TEXT, instrument TEXT,
     part TEXT, operator TEXT, replicate INTEGER, value REAL
 );
+CREATE TABLE IF NOT EXISTS process (
+    lot_id TEXT, param TEXT, value REAL, text TEXT, PRIMARY KEY (lot_id, param)
+);
+CREATE TABLE IF NOT EXISTS changes (
+    change_no TEXT PRIMARY KEY, date TEXT, category TEXT, item TEXT, description TEXT,
+    owner TEXT, notified TEXT
+);
+CREATE TABLE IF NOT EXISTS complaints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, no TEXT, received TEXT, customer TEXT, lot_id TEXT,
+    property TEXT, symptom TEXT, qty REAL, unit TEXT, severity TEXT, status TEXT
+);
+CREATE TABLE IF NOT EXISTS actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT, step TEXT, kind TEXT, action TEXT,
+    verification TEXT, owner TEXT, due TEXT, status TEXT, created TEXT, closed TEXT, note TEXT,
+    UNIQUE (ref, step, action)
+);
 CREATE TABLE IF NOT EXISTS ingest_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     at TEXT, file TEXT, kind TEXT, profile TEXT, confidence REAL,
