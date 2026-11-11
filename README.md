@@ -2,6 +2,8 @@
 
 반도체 패키징 소재(언더필·에폭시 접착제) 공장의 품질 데이터를 **장비 제조사·펌웨어·단위·언어에 상관없이 자동으로 모으고**, MSA·공정능력·SPC·공급사 품질·원료→제품 예측까지 한 번에 분석해 **조치(8D·SCAR)까지 만들어 주는** Streamlit 앱입니다.
 
+https://materialqualityintelligence-dknsnjemfstfko4zluzplu.streamlit.app/
+
 > 모든 데이터는 합성 데이터입니다. 실제 공장처럼 여러 장비 형식과 숨은 문제를 일부러 심어 두었고, 앱이 그것을 스스로 찾아내는지 테스트로 검증합니다.
 
 ![overview](docs/img/overview.png)
