@@ -1,9 +1,23 @@
 """streamlit run app/main.py"""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import streamlit as st
 
-import ui
+# Streamlit only hot-reloads modules inside app/. After a new deploy the long-running server would keep
+# the old mqi package (old schema, old texts), so drop it whenever any source file changed.
+_SRC = Path(__file__).resolve().parents[1]
+_SIG = max(p.stat().st_mtime for d in ("mqi", "app") for p in (_SRC / d).rglob("*.py"))
+if getattr(sys, "_mqi_sig", None) != _SIG:
+    for _m in [m for m in sys.modules if m.split(".")[0] in ("mqi", "views", "ui")]:
+        del sys.modules[_m]
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    sys._mqi_sig = _SIG
+
+import ui  # noqa: E402
 from views import actions, capability, intake, msa, overview, release, report, settings, shipping, spc, supplier
 
 st.set_page_config(page_title="Material Quality Intelligence", page_icon="◆", layout="wide")
