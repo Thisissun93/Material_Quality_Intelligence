@@ -395,6 +395,28 @@ def _coa_report(out: Path, r, product: str, grade: str, qty: int, items) -> None
     c.save()
 
 
+# Bump when the planted scenarios change, so a deployed app rebuilds an older demo database.
+DEMO_VERSION = "2"
+
+
+def _stamp(dbpath=None) -> Path:
+    return Path(dbpath or config.DB_PATH).with_suffix(".demo")
+
+
+def is_stale(dbpath=None) -> bool:
+    """True for a demo database built by an older version (real plant data is never touched)."""
+    path = Path(dbpath or config.DB_PATH)
+    if not path.exists():
+        return False
+    st = _stamp(path)
+    if st.exists() and st.read_text().strip() == DEMO_VERSION:
+        return False
+    try:
+        return bool(len(db.read("SELECT 1 FROM measurements WHERE lot_id='UF-2609-012' LIMIT 1", (), path)))
+    except Exception:
+        return False
+
+
 def build(folder: Path | None = None, dbpath: Path | None = None, ingest: bool = True):
     """Generate the demo files and push them through the real ingest pipeline."""
     from .ingest.pipeline import process_folder
@@ -409,6 +431,7 @@ def build(folder: Path | None = None, dbpath: Path | None = None, ingest: bool =
     res = process_folder(folder, dbpath)
     complaint_no = seed_complaint(dbpath)
     seed_oos_retest(dbpath, complaint_no)
+    _stamp(dbpath).write_text(DEMO_VERSION)
     return res
 
 
