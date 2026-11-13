@@ -9,3 +9,4 @@ data/jmp/
 config/history/
 .streamlit/secrets.toml
 .DS_Store
+data/*.demo

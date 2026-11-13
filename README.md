@@ -101,6 +101,20 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 <td><img src="docs/img/shipping.png" alt="shipping"></td>
 </tr></table>
 
+#### 재시험으로 최초 부적합을 덮지 않기 (OOS 관리)
+현장에서는 첫 측정이 이탈한 뒤 재측정에서 합격하는 경우가 있습니다. 마지막 값만 보면 출하 가능으로 보이지만, 그 사이에 측정 문제였는지 제품 문제였는지 확인한 근거가 없으면 출하할 수 없습니다.
+
+| 원칙 | 앱의 동작 |
+|---|---|
+| 측정값은 고치지 않는다 | 재시험은 새 행으로 추가하고, 최초 결과는 항상 남김 (차수·구분·사유·측정자·일시) |
+| 조사 없이 재시험하지 않는다 | 이탈 결과에 OOS 조사를 등록해야 재시험 입력 가능 |
+| 재시험 합격만으로 출하하지 않는다 | 최초 이탈이 있으면 조사가 끝날 때까지 출하 불가, 성적서 발행 차단 |
+| 무효 처리는 실험실 오류가 입증될 때만 | 1단계(실험실) 조사에서 장비·측정자·시료 준비·계산·표준물질 중 원인과 근거를 기록해야 최초 결과가 무효가 되고, 재시험 결과가 채택됨 |
+| 실험실 오류가 없으면 이탈은 유효 | 2단계(제조) 조사로 넘어가 폐기·재작업·고객 특채 중 처리를 정하고, 로트는 출하 불가 유지 |
+| 사유 없는 추가 측정은 보류 | 같은 로트를 사유 없이 다시 측정한 기록이 있으면 QA 판단 보류 |
+
+![oos](docs/img/oos.png)
+
 ## 데모 데이터에 심어 둔 문제와 앱이 찾은 결과
 
 | 심어 둔 문제 | 앱의 판단 |
@@ -113,15 +127,16 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 | 4M 변경 이력에 7월 믹서 M2 정비, 8월 DSC 교체 기록 (NanoSphere 변경은 통보 없음) | 점도 8D: 믹서 정비 "제외", 공급사 변경 미통보를 시스템 원인으로 기록 · Tg 8D: DSC 교체 "원인 후보" |
 | KoPolymer는 8로트뿐, Ppk 0.77 | 신뢰구간 0.30–1.23 → "판정 보류(데이터 부족)", 강화 판정하지 않음 |
 | 고객 클레임 1건: 규격 내지만 점도 상위 로트 | 클레임 기준 8D, 해당 로트 출하 판정 "보류" |
+| 최근 로트 1건: 첫 점도 4,640 mPa·s(USL 4,500, 측정자 Park) → 같은 시료 재측정 합격, OOS 조사 없음 | 재측정값으로 분석하되 최초 결과를 보존하고 "출하 불가: OOS 조사 필요" |
 
-위 결과는 `tests/`의 테스트 39개가 커밋마다 GitHub Actions에서 확인합니다.
+위 결과는 `tests/`의 테스트 44개가 커밋마다 GitHub Actions에서 확인합니다.
 
 ## 실행
 
 ```bash
 pip install -r requirements.txt
 streamlit run app/main.py       # 첫 실행 시 데모 데이터를 자동 생성
-pytest -q                       # 테스트 39개
+pytest -q                       # 테스트 44개
 ```
 
 | 하고 싶은 일 | 방법 |
@@ -175,4 +190,4 @@ Taeyang Kim · [github.com/Thisissun93](https://github.com/Thisissun93)
 ---
 
 ### English summary
-An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. All data is synthetic; the test suite checks that every planted problem is found.
+An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. Repeat tests never overwrite the first result: a lot whose first result was out of specification stays blocked until an OOS investigation either proves a laboratory error (phase 1) or confirms the failure and sets a disposition (phase 2). All data is synthetic; the test suite checks that every planted problem is found.

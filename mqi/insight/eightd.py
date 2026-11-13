@@ -264,8 +264,7 @@ def build(b: engine.Bundle, prop: str = "viscosity", lang: str = "ko", complaint
         clist.append((c["change_no"], str(c["date"])[:10], c["category"], f"{c['item']}: {c['description']}", ev,
                       L("원인 후보", "Candidate") if hit else L("제외", "Excluded")))
     sup_changed = bool(len(near_c) and sup and near_c["item"].str.contains(sup, case=False).any())
-    m_op = db.read("SELECT lot_id, operator, value FROM measurements WHERE material='product' AND property=?",
-                   (prop,), b.dbpath)
+    m_op = db.product_results(prop, b.dbpath)[["lot_id", "operator", "value"]]
     m_op = m_op[m_op["lot_id"].isin(after["lot_id"])] if len(after) else m_op
     if m_op["operator"].nunique() > 1:
         ops = m_op.groupby("operator")["value"].mean()

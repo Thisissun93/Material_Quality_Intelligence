@@ -395,6 +395,28 @@ def _coa_report(out: Path, r, product: str, grade: str, qty: int, items) -> None
     c.save()
 
 
+# Bump when the planted scenarios change, so a deployed app rebuilds an older demo database.
+DEMO_VERSION = "2"
+
+
+def _stamp(dbpath=None) -> Path:
+    return Path(dbpath or config.DB_PATH).with_suffix(".demo")
+
+
+def is_stale(dbpath=None) -> bool:
+    """True for a demo database built by an older version (real plant data is never touched)."""
+    path = Path(dbpath or config.DB_PATH)
+    if not path.exists():
+        return False
+    st = _stamp(path)
+    if st.exists() and st.read_text().strip() == DEMO_VERSION:
+        return False
+    try:
+        return bool(len(db.read("SELECT 1 FROM measurements WHERE lot_id='UF-2609-012' LIMIT 1", (), path)))
+    except Exception:
+        return False
+
+
 def build(folder: Path | None = None, dbpath: Path | None = None, ingest: bool = True):
     """Generate the demo files and push them through the real ingest pipeline."""
     from .ingest.pipeline import process_folder
@@ -407,8 +429,41 @@ def build(folder: Path | None = None, dbpath: Path | None = None, ingest: bool =
         return []
     db.reset(dbpath)
     res = process_folder(folder, dbpath)
-    seed_complaint(dbpath)
+    complaint_no = seed_complaint(dbpath)
+    seed_oos_retest(dbpath, complaint_no)
+    _stamp(dbpath).write_text(DEMO_VERSION)
     return res
+
+
+def seed_oos_retest(dbpath=None, complaint_no: str | None = None) -> str | None:
+    """A recent lot whose first viscosity result was over USL and was simply re-measured.
+
+    The analyst Park (who reads high in the Gage R&R) reported 4,640 mPa·s; the lab re-measured the
+    same sample and got the normal value, but no OOS investigation was opened. The app must keep the
+    first result and block the lot instead of shipping on the passing retest.
+    """
+    from . import qms
+    p = db.product_wide(path=dbpath)
+    if p.empty or "viscosity" not in p:
+        return None
+    skip = {"UF-2609-012"}
+    c = qms.complaint(complaint_no, dbpath) if complaint_no else None
+    if c:
+        skip.add(c["lot_id"])
+    cand = p.tail(15)
+    cand = cand[~cand["lot_id"].isin(skip)]
+    lot = cand.iloc[(cand["viscosity"] - 3500).abs().argsort()].iloc[0]
+    with db.connect(dbpath) as con:
+        row = con.execute("SELECT measured_at, unit, instrument, profile FROM measurements WHERE lot_id=? AND "
+                          "property='viscosity' AND source='inhouse'", (lot["lot_id"],)).fetchone()
+        con.execute("UPDATE measurements SET attempt='remeasure', reason=?, operator='Kim' WHERE lot_id=? AND "
+                    "property='viscosity' AND source='inhouse'",
+                    ("First result over USL; same retained sample re-measured", lot["lot_id"]))
+        con.execute("INSERT INTO measurements (lot_id, material, property, value, unit, source, instrument, profile, "
+                    "operator, measured_at, source_file, attempt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (lot["lot_id"], "product", "viscosity", 4640.0, row[1], "inhouse", row[2], row[3], "Park",
+                     row[0], f"LIMS_first_result_{lot['lot_id']}", "initial"))
+    return lot["lot_id"]
 
 
 def seed_complaint(dbpath=None) -> str | None:
