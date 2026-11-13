@@ -117,8 +117,7 @@ def instrument_shift(prop: str, dbpath=None, b: Bundle | None = None) -> dict | 
     """
     import statsmodels.api as sm
 
-    m = db.read("SELECT lot_id, value, instrument, measured_at FROM measurements "
-                "WHERE material='product' AND source='inhouse' AND property=? ORDER BY measured_at", (prop,), dbpath)
+    m = db.product_results(prop, dbpath)[["lot_id", "value", "instrument", "measured_at"]]
     if m["instrument"].nunique() < 2:
         return None
     first_use = m.groupby("instrument")["measured_at"].min().sort_values()

@@ -24,7 +24,20 @@ CREATE TABLE IF NOT EXISTS measurements (
     source TEXT,               -- inhouse | coa
     instrument TEXT, profile TEXT, operator TEXT,
     measured_at TEXT, source_file TEXT,
+    attempt TEXT,              -- initial | remeasure | resample (NULL = as ingested)
+    reason TEXT,               -- why a repeat test was run
     UNIQUE (lot_id, property, source, source_file)
+);
+-- OOS investigation. Measurements are never edited: a result is invalidated only by a closed
+-- investigation that proved a laboratory error, so the original value always stays on record.
+CREATE TABLE IF NOT EXISTS oos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, no TEXT UNIQUE,
+    lot_id TEXT, property TEXT, value REAL, source_file TEXT, measured_at TEXT,
+    opened TEXT, opened_by TEXT,
+    phase1 TEXT,               -- pending | lab_error | no_lab_error
+    phase1_category TEXT, phase1_cause TEXT, phase1_by TEXT, phase1_at TEXT,
+    phase2_finding TEXT, disposition TEXT, phase2_by TEXT, phase2_at TEXT,
+    outcome TEXT               -- open | invalidated | confirmed
 );
 CREATE TABLE IF NOT EXISTS msa (
     study TEXT, property TEXT, instrument TEXT,
@@ -54,6 +67,14 @@ CREATE TABLE IF NOT EXISTS ingest_log (
 """
 
 
+def _migrate(con) -> None:
+    """Add columns introduced after a database was first created."""
+    have = {r[1] for r in con.execute("PRAGMA table_info(measurements)")}
+    for col in ("attempt", "reason"):
+        if col not in have:
+            con.execute(f"ALTER TABLE measurements ADD COLUMN {col} TEXT")
+
+
 @contextmanager
 def connect(path: Path | None = None):
     path = Path(path or config.DB_PATH)
@@ -61,6 +82,7 @@ def connect(path: Path | None = None):
     con = sqlite3.connect(path)
     try:
         con.executescript(SCHEMA)
+        _migrate(con)
         yield con
         con.commit()
     finally:
@@ -109,14 +131,50 @@ def reset(path: Path | None = None) -> None:
 
 # ---- convenience views -------------------------------------------------------
 
+RANK = {"initial": 0, "remeasure": 1, "resample": 1}
+
+
+def product_history(lot: str | None = None, prop: str | None = None, path: Path | None = None) -> pd.DataFrame:
+    """Every in-house product result in test order, with seq (1 = first test) and invalidated flag."""
+    q, p = ("SELECT id, lot_id, property, value, unit, instrument, operator, measured_at, source_file, attempt, "
+            "reason FROM measurements WHERE material='product' AND source='inhouse'"), []
+    if lot:
+        q, p = q + " AND lot_id=?", p + [lot]
+    if prop:
+        q, p = q + " AND property=?", p + [prop]
+    m = read(q, tuple(p), path)
+    if m.empty:
+        return m.assign(seq=pd.Series(dtype=int), invalidated=pd.Series(dtype=bool))
+    m["_r"] = m["attempt"].map(RANK).fillna(0)
+    m = m.sort_values(["measured_at", "_r", "id"]).drop(columns="_r")
+    m["seq"] = m.groupby(["lot_id", "property"]).cumcount() + 1
+    inv = read("SELECT lot_id, property, source_file FROM oos WHERE outcome='invalidated'", (), path)
+    key = set(map(tuple, inv.values.tolist()))
+    m["invalidated"] = [k in key for k in zip(m["lot_id"], m["property"], m["source_file"])]
+    return m.reset_index(drop=True)
+
+
+def product_results(prop: str, path: Path | None = None) -> pd.DataFrame:
+    """The reportable result per lot: the latest result that was not invalidated by an OOS investigation."""
+    h = product_history(prop=prop, path=path)
+    return h[~h["invalidated"]].groupby("lot_id").tail(1).reset_index(drop=True) if len(h) else h
+
+
 def product_wide(source: str = "inhouse", path: Path | None = None) -> pd.DataFrame:
-    """One row per product lot, one column per property (latest value)."""
-    m = read("SELECT lot_id, property, value, measured_at FROM measurements "
-             "WHERE material='product' AND source=?", (source,), path)
+    """One row per product lot, one column per property (reportable value).
+
+    In-house: latest result in test order, excluding results invalidated by an OOS investigation.
+    Whether the lot can ship despite an earlier failing result is decided in outgoing.release_check.
+    """
+    if source == "inhouse":
+        m = product_history(path=path)
+        m = m[~m["invalidated"]] if len(m) else m
+    else:
+        m = read("SELECT lot_id, property, value, measured_at FROM measurements "
+                 "WHERE material='product' AND source=?", (source,), path).sort_values("measured_at")
     if m.empty:
         return m
-    w = m.sort_values("measured_at").pivot_table(index="lot_id", columns="property",
-                                                 values="value", aggfunc="last")
+    w = m.pivot_table(index="lot_id", columns="property", values="value", aggfunc="last", sort=False)
     t = m.groupby("lot_id")["measured_at"].min().rename("measured_at")
     return w.join(t).sort_values("measured_at").reset_index()
 
