@@ -95,3 +95,8 @@ def test_repeat_without_reason_is_held(plant):
                     "measured_at, source_file) VALUES (?,?,?,?,?,?,?,?,?)",
                     (lot, "product", "viscosity", 3500, "mPa·s", "inhouse", "Kim", "2099-01-01", "re-export.csv"))
     assert outgoing.release_check(engine.run(plant), lot)[0] == "hold"
+
+
+def test_overview_lists_the_blocked_lot(bundle):
+    from mqi.insight import rules
+    assert any(f.key.startswith("oos_") and f.severity == "high" for f in rules.findings(bundle))

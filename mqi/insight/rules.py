@@ -224,6 +224,17 @@ def findings(b: engine.Bundle) -> list[Finding]:
                 f"다음 배치는 {best['resin_lot']} + {best['filler_lot']} + {best['hardener_lot']} 조합 권장",
                 f"Use {best['resin_lot']} + {best['filler_lot']} + {best['hardener_lot']} for the next batch"))
 
+    # ---- first results out of spec that a later result would otherwise hide
+    from .. import oos
+    for lot, fl in oos.flag_table(b.dbpath).items():
+        blocks = [x for x in fl if x[0] == "block"]
+        if blocks:
+            out.append(_f(
+                f"oos_{lot}", "OOS", "high",
+                f"로트 {lot}: 최초 결과 규격 이탈, 출하 불가", f"Lot {lot}: first result out of spec, release blocked",
+                blocks[0][1], blocks[0][2],
+                "출하 판정 화면에서 OOS 조사 등록 → 1단계 실험실 조사 (재시험 합격만으로 해제 불가)",
+                "Open the OOS investigation on the Release page → phase 1 lab check (a passing retest alone cannot release)"))
     out.sort(key=lambda f: (SEV[f.severity], f.area))
     # ---- open complaints and overdue actions
     from .. import qms
