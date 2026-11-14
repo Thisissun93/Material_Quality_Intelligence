@@ -1,0 +1,59 @@
+# PostgreSQL + REST API + Streamlit app.   docker compose up --build
+#   API docs  http://localhost:8000/docs
+#   App       http://localhost:8501
+x-mqi: &mqi
+  build: .
+  image: mqi:latest
+  environment:
+    MQI_DATABASE_URL: postgresql://mqi:${POSTGRES_PASSWORD:-mqi}@db:5432/mqi
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mqi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mqi}
+      POSTGRES_DB: mqi
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mqi -d mqi"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # one-shot: create the schema and the demo plant if the database is empty (never touches plant data)
+  init:
+    <<: *mqi
+    command: ["python", "-m", "mqi", "init"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *mqi
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["8000:8000"]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  app:
+    <<: *mqi
+    command: ["streamlit", "run", "app/main.py", "--server.port", "8501", "--server.address", "0.0.0.0",
+              "--server.headless", "true"]
+    ports: ["8501:8501"]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

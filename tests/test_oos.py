@@ -1,7 +1,5 @@
 """OOS handling: the first failing result is kept, a passing retest cannot release the lot on its own,
 and only a proven laboratory error sets the failing result aside."""
-import shutil
-
 import pytest
 
 from mqi import db, engine, oos, outgoing
@@ -10,9 +8,9 @@ from mqi import db, engine, oos, outgoing
 @pytest.fixture()
 def plant(demo, tmp_path):
     """A private copy of the demo database, so these tests can write to it."""
-    path = tmp_path / "mqi.sqlite"
-    shutil.copy(demo["db"], path)
-    return path
+    from conftest import clone_store
+
+    return clone_store(demo["db"], tmp_path)
 
 
 def _fresh_lot(path):

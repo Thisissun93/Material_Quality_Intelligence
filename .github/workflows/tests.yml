@@ -1,12 +1,57 @@
 name: tests
 on: [push, pull_request]
+
 jobs:
-  test:
+  sqlite:
+    name: tests (SQLite)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt -r requirements-api.txt
       - run: pytest -q
+
+  postgres:
+    name: tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mqi
+          POSTGRES_PASSWORD: mqi
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mqi" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      MQI_TEST_DATABASE_URL: postgresql://mqi:mqi@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-api.txt
+      - run: pytest -q
+
+  compose:
+    name: docker compose (PostgreSQL + API + app)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d --build
+      - name: wait for the API
+        run: |
+          for i in $(seq 1 60); do
+            curl -fs localhost:8000/health && break
+            sleep 3
+          done
+          curl -fs localhost:8000/health | grep '"backend":"postgresql"'
+      - name: smoke test
+        run: |
+          curl -fs "localhost:8000/api/v1/lots?status=block" | grep -q OOS
+          curl -fs -o /dev/null localhost:8501
+      - if: failure()
+        run: docker compose logs

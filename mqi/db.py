@@ -1,6 +1,12 @@
-"""SQLite store. One file, no server. Every analysis reads from here."""
+"""Storage. SQLite file by default (demo, Streamlit Cloud, tests); PostgreSQL when MQI_DATABASE_URL is set.
+
+Every module talks to the database through connect() and read(), using SQLite-style SQL ("?" placeholders,
+INSERT OR REPLACE / OR IGNORE). For PostgreSQL the statements are translated in one place (_pg_sql), so the
+analysis code stays the same on both backends.
+"""
 from __future__ import annotations
 
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -64,37 +70,245 @@ CREATE TABLE IF NOT EXISTS ingest_log (
     at TEXT, file TEXT, kind TEXT, profile TEXT, confidence REAL,
     rows INTEGER, status TEXT, note TEXT
 );
+-- key/value: demo_version (which demo build created the data), rev (bumped on every write)
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY, value TEXT
+);
 """
 
+# columns per table (for INSERT without a column list) and the conflict key used by INSERT OR REPLACE
+def _columns(body: str) -> list[str]:
+    body, parts, depth, cur = re.sub(r"--[^\n]*", "", body), [], 0, ""
+    for ch in body:
+        depth += (ch == "(") - (ch == ")")
+        if ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    return [x.split()[0] for x in (q.strip() for q in parts)
+            if x and not x.upper().startswith(("PRIMARY KEY", "UNIQUE"))]
 
-def _migrate(con) -> None:
+
+_COLS = {t: _columns(body) for t, body in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", SCHEMA, re.S)}
+_KEYS = {"lots": ["lot_id"], "genealogy": ["product_lot", "material"], "process": ["lot_id", "param"],
+         "changes": ["change_no"], "measurements": ["lot_id", "property", "source", "source_file"],
+         "meta": ["key"]}
+_ready: set[str] = set()
+
+
+# ---------------------------------------------------------------- target
+
+def target(path=None):
+    """What to open: an explicit path/URL, else MQI_DATABASE_URL, else the default SQLite file."""
+    if path is None:
+        return config.database_url() or config.DB_PATH
+    return path
+
+
+def is_pg(t) -> bool:
+    return isinstance(t, str) and t.startswith(("postgresql://", "postgres://"))
+
+
+def backend(path=None) -> str:
+    return "postgresql" if is_pg(target(path)) else "sqlite"
+
+
+# ---------------------------------------------------------------- PostgreSQL translation
+
+def _pg_sql(sql: str) -> str:
+    s = sql.replace("%", "%%").replace("?", "%s")
+    m = re.match(r"\s*INSERT OR (REPLACE|IGNORE) INTO (\w+)\s*(\(([^)]*)\))?\s*VALUES", s, re.I)
+    if not m:
+        return s
+    kind, table, cols = m.group(1).upper(), m.group(2), m.group(4)
+    cols = [c.strip() for c in cols.split(",")] if cols else _COLS[table]
+    body = s[m.end():]
+    head = f"INSERT INTO {table} ({', '.join(cols)}) VALUES"
+    if kind == "IGNORE":
+        return f"{head}{body} ON CONFLICT DO NOTHING"
+    key = _KEYS[table]
+    upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c not in key)
+    return f"{head}{body} ON CONFLICT ({', '.join(key)}) DO " + (f"UPDATE SET {upd}" if upd else "NOTHING")
+
+
+def _pg_schema() -> list[str]:
+    s = SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY").replace(" REAL", " DOUBLE PRECISION")
+    return [x for x in (re.sub(r"--[^\n]*", "", q).strip() for q in s.split(";")) if x]
+
+
+class _Cursor:
+    """sqlite3-like cursor over psycopg (fetchone/fetchall/lastrowid)."""
+
+    def __init__(self, cur, lastrowid=None):
+        self._cur, self.lastrowid = cur, lastrowid
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+    def __iter__(self):
+        return iter(self._cur.fetchall())
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    @property
+    def description(self):
+        return self._cur.description
+
+
+class _PgConnection:
+    """The subset of sqlite3.Connection that MQI uses, on top of psycopg."""
+
+    def __init__(self, url: str):
+        import psycopg
+
+        self._con = psycopg.connect(url, cursor_factory=psycopg.ClientCursor)
+        self.total_changes = 0
+        self.wrote = False
+
+    def execute(self, sql: str, params=()):
+        q = _pg_sql(sql)
+        is_insert = q.lstrip().upper().startswith("INSERT")
+        if is_insert and " RETURNING " not in q.upper() and "ON CONFLICT" not in q.upper() and _has_id(q):
+            q += " RETURNING id"
+            cur = self._con.cursor()
+            cur.execute(q, tuple(params))
+            row = cur.fetchone()
+            self._count(cur)
+            return _Cursor(cur, row[0] if row else None)
+        cur = self._con.cursor()
+        cur.execute(q, tuple(params))
+        self._count(cur)
+        return _Cursor(cur)
+
+    def executemany(self, sql: str, seq):
+        cur = self._con.cursor()
+        rows = [tuple(r) for r in seq]
+        if rows:
+            cur.executemany(_pg_sql(sql), rows)
+            self._count(cur)
+        return _Cursor(cur)
+
+    def _count(self, cur):
+        if cur.description is None:          # not a SELECT
+            self.wrote = True
+            self.total_changes += max(cur.rowcount, 0)
+
+    def commit(self):
+        self._con.commit()
+
+    def rollback(self):
+        self._con.rollback()
+
+    def close(self):
+        self._con.close()
+
+
+def _has_id(sql: str) -> bool:
+    m = re.match(r"\s*INSERT INTO (\w+)", sql, re.I)
+    return bool(m) and "id" in _COLS.get(m.group(1), [])
+
+
+# ---------------------------------------------------------------- connect / read
+
+def _migrate(con, pg: bool) -> None:
     """Add columns introduced after a database was first created."""
-    have = {r[1] for r in con.execute("PRAGMA table_info(measurements)")}
+    if pg:
+        have = {r[0] for r in con.execute("SELECT column_name FROM information_schema.columns "
+                                          "WHERE table_name='measurements'").fetchall()}
+    else:
+        have = {r[1] for r in con.execute("PRAGMA table_info(measurements)")}
     for col in ("attempt", "reason"):
         if col not in have:
             con.execute(f"ALTER TABLE measurements ADD COLUMN {col} TEXT")
 
 
 @contextmanager
-def connect(path: Path | None = None):
-    path = Path(path or config.DB_PATH)
+def connect(path=None):
+    """A connection to the store. Commits on success, rolls back on error."""
+    t = target(path)
+    if is_pg(t):
+        con = _PgConnection(t)
+        try:
+            if t not in _ready:
+                for q in _pg_schema():
+                    con._con.execute(q)
+                _migrate(con, True)
+                con.commit()
+                _ready.add(t)
+            con.wrote = False
+            yield con
+            if con.wrote:
+                con._con.execute("INSERT INTO meta (key, value) VALUES ('rev', '1') ON CONFLICT (key) DO UPDATE "
+                                 "SET value = (CAST(meta.value AS INTEGER) + 1)::TEXT")
+            con.commit()
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            con.close()
+        return
+    path = Path(t)
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
     try:
         con.executescript(SCHEMA)
-        _migrate(con)
+        _migrate(con, False)
         yield con
         con.commit()
     finally:
         con.close()
 
 
-def read(sql: str, params: tuple = (), path: Path | None = None) -> pd.DataFrame:
+def read(sql: str, params: tuple = (), path=None) -> pd.DataFrame:
     with connect(path) as con:
+        if isinstance(con, _PgConnection):
+            cur = con.execute(sql, params)
+            return pd.DataFrame(cur.fetchall(), columns=[d.name for d in cur.description])
         return pd.read_sql_query(sql, con, params=params)
 
 
-def upsert_measurements(df: pd.DataFrame, path: Path | None = None) -> int:
+def exists(path=None) -> bool:
+    """True if the store has been created and holds at least one lot."""
+    t = target(path)
+    if not is_pg(t) and not Path(t).exists():
+        return False
+    try:
+        return len(read("SELECT 1 FROM lots LIMIT 1", (), path)) > 0
+    except Exception:
+        return False
+
+
+def revision(path=None):
+    """Changes whenever the data changes (used by the UI to refresh its cached analysis)."""
+    t = target(path)
+    if is_pg(t):
+        try:
+            r = read("SELECT value FROM meta WHERE key='rev'", (), path)
+            return r["value"].iloc[0] if len(r) else "0"
+        except Exception:
+            return "0"
+    p = Path(t)
+    return p.stat().st_mtime if p.exists() else 0
+
+
+def get_meta(key: str, path=None) -> str | None:
+    r = read("SELECT value FROM meta WHERE key=?", (key,), path)
+    return r["value"].iloc[0] if len(r) else None
+
+
+def set_meta(key: str, value: str, path=None) -> None:
+    with connect(path) as con:
+        con.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value))
+
+
+def upsert_measurements(df: pd.DataFrame, path=None) -> int:
     cols = ["lot_id", "material", "property", "value", "unit", "source",
             "instrument", "profile", "operator", "measured_at", "source_file"]
     df = df.reindex(columns=cols)
@@ -107,15 +321,17 @@ def upsert_measurements(df: pd.DataFrame, path: Path | None = None) -> int:
         return con.total_changes - before
 
 
-def write_table(name: str, df: pd.DataFrame, path: Path | None = None, replace: bool = False) -> None:
+def write_table(name: str, df: pd.DataFrame, path=None, replace: bool = False) -> None:
+    cols = list(df.columns)
+    rows = df.astype(object).where(df.notna(), None).values.tolist()
     with connect(path) as con:
         if replace:
             con.execute(f"DELETE FROM {name}")
-        df.to_sql(name, con, if_exists="append", index=False)
+        con.executemany(f"INSERT INTO {name} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", rows)
 
 
 def log_ingest(file: str, kind: str, profile: str | None, confidence: float | None,
-               rows: int, status: str, note: str = "", path: Path | None = None) -> None:
+               rows: int, status: str, note: str = "", path=None) -> None:
     with connect(path) as con:
         con.execute(
             "INSERT INTO ingest_log (at, file, kind, profile, confidence, rows, status, note) VALUES (?,?,?,?,?,?,?,?)",
@@ -123,8 +339,18 @@ def log_ingest(file: str, kind: str, profile: str | None, confidence: float | No
         )
 
 
-def reset(path: Path | None = None) -> None:
-    p = Path(path or config.DB_PATH)
+def reset(path=None) -> None:
+    """Delete all data (SQLite: remove the file; PostgreSQL: drop the tables)."""
+    t = target(path)
+    if is_pg(t):
+        import psycopg
+
+        with psycopg.connect(t) as con:
+            for name in _COLS:
+                con.execute(f"DROP TABLE IF EXISTS {name} CASCADE")
+        _ready.discard(t)
+        return
+    p = Path(t)
     if p.exists():
         p.unlink()
 

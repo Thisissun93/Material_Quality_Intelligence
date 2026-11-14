@@ -12,7 +12,7 @@
 
 ![overview](docs/img/overview.png)
 
-**목차** · [무엇이 다른가](#무엇이-다른가) · [3분 둘러보기](#3분-둘러보기) · [핵심 기능](#핵심-기능) · [심어 둔 문제와 결과](#데모-데이터에-심어-둔-문제와-앱이-찾은-결과) · [실행](#실행) · [검증](#검증) · [구조](#구조) · [English](#english-summary)
+**목차** · [무엇이 다른가](#무엇이-다른가) · [3분 둘러보기](#3분-둘러보기) · [핵심 기능](#핵심-기능) · [심어 둔 문제와 결과](#데모-데이터에-심어-둔-문제와-앱이-찾은-결과) · [실행](#실행) · [서비스로 운영하기](#서비스로-운영하기-postgresql--rest-api--docker) · [검증](#검증) · [구조](#구조) · [English](#english-summary)
 
 ## 무엇이 다른가
 
@@ -131,14 +131,14 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 | 고객 클레임 1건: 규격 내지만 점도 상위 로트 | 클레임 기준 8D, 해당 로트 출하 판정 "보류" |
 | 최근 로트 1건: 첫 점도 4,640 mPa·s(USL 4,500, 측정자 Park) → 같은 시료 재측정 합격, OOS 조사 없음 | 재측정값으로 분석하되 최초 결과를 보존하고 "출하 불가: OOS 조사 필요" |
 
-위 결과는 `tests/`의 테스트 44개가 커밋마다 GitHub Actions에서 확인합니다.
+위 결과는 `tests/`의 테스트 50개가 커밋마다 GitHub Actions에서 SQLite와 PostgreSQL 두 DB로 확인합니다.
 
 ## 실행
 
 ```bash
 pip install -r requirements.txt
-streamlit run app/main.py       # 첫 실행 시 데모 데이터를 자동 생성
-pytest -q                       # 테스트 44개
+streamlit run app/main.py       # 첫 실행 시 데모 데이터를 자동 생성 (SQLite 파일)
+pytest -q                       # 테스트 50개 (API 테스트는 requirements-api.txt 설치 시)
 ```
 
 | 하고 싶은 일 | 방법 |
@@ -147,6 +147,67 @@ pytest -q                       # 테스트 44개
 | 새 장비 추가 | 파일을 올리고 `새 형식 학습`에서 확인 → 저장, 또는 YAML 하나 추가 |
 | 동의어 추가 | `config/vocabulary.yaml`에 한 줄 |
 | AI 문장 다듬기 (선택) | `보고서` 화면 → `AI 설정`에 Anthropic API 키 입력 (세션에만 보관, 저장하지 않음). 환경변수 `ANTHROPIC_API_KEY`도 가능. 키가 없어도 모든 기능이 규칙 기반으로 동작합니다. |
+
+## 서비스로 운영하기 (PostgreSQL · REST API · Docker)
+
+Streamlit 데모는 혼자 보는 도구입니다. 현장에서 운용하려면 여러 사람이 동시에 쓰고, MES·LIMS·설비 수집기 같은 다른 시스템이 데이터를 주고받을 수 있어야 합니다. 그래서 같은 분석 로직(`mqi/`)을 그대로 두고 **저장소와 접점**을 바꿨습니다.
+
+```bash
+docker compose up --build
+# API 문서   http://localhost:8000/docs
+# 앱        http://localhost:8501
+```
+
+```mermaid
+flowchart LR
+  subgraph clients[사용하는 쪽]
+    U[품질 담당자<br/>Streamlit 앱]
+    X[다른 시스템<br/>MES · LIMS · 설비 수집기]
+  end
+  subgraph svc[MQI 서비스]
+    API[REST API<br/>FastAPI]
+    APP[Streamlit 앱]
+    CORE[분석·규칙 엔진<br/>mqi/]
+  end
+  DB[(PostgreSQL)]
+  INIT[init<br/>스키마·데모 생성]
+  U --> APP
+  X -- HTTP/JSON --> API
+  APP --> CORE
+  API --> CORE
+  CORE --> DB
+  INIT --> DB
+```
+
+| 서비스 | 하는 일 |
+|---|---|
+| `db` | PostgreSQL 16. 데이터는 볼륨에 보관 (포트는 외부에 열지 않음) |
+| `init` | 시작할 때 한 번 실행. DB가 비어 있으면 스키마와 데모 공장을 만들고 종료. 실제 공장 데이터가 있으면 손대지 않음 |
+| `api` | REST API (`/docs`에서 바로 호출 가능), 상태 확인 `/health` |
+| `app` | 같은 DB를 보는 Streamlit 앱. API로 등록한 OOS 조사가 화면에 바로 반영됨 |
+
+**주요 API**
+
+| 메서드 | 경로 | 내용 |
+|---|---|---|
+| GET | `/api/v1/lots?status=block` | 최근 로트 출하 판정과 사유 |
+| GET | `/api/v1/lots/{lot}/release` | 한 로트의 판정, 보고값, 규격 |
+| GET | `/api/v1/lots/{lot}/history` | 검사 이력 (무효 처리된 최초 결과 포함) |
+| POST | `/api/v1/lots/{lot}/retests` | 재시험 등록 (이탈 결과에 OOS 조사가 없으면 409로 거절) |
+| POST | `/api/v1/oos` | OOS 조사 등록 |
+| POST | `/api/v1/oos/{no}/phase1` · `/phase2` | 실험실 조사 · 제조 조사 종결 |
+| GET | `/api/v1/findings` | 개요 화면의 우선 조치 목록 |
+
+**설계에서 정한 것**
+- **SQLite와 PostgreSQL을 모두 지원.** `MQI_DATABASE_URL`이 있으면 PostgreSQL, 없으면 SQLite 파일입니다. SQL 변환은 `mqi/db.py` 한 곳에서만 하고 분석 코드는 그대로 둡니다. 덕분에 Streamlit Cloud 데모는 계속 SQLite로 돌고, 테스트 50개는 CI에서 두 DB로 각각 실행됩니다.
+- **업무 규칙 위반은 409, 입력 형식 오류는 422.** 예를 들어 OOS 조사 없이 재시험을 넣으면 409와 이유를 돌려줍니다. 호출하는 시스템이 무엇을 고쳐야 하는지 알 수 있게 하기 위해서입니다.
+- **분석은 데이터가 바뀔 때만 다시 계산.** 쓰기가 일어날 때마다 DB의 `rev` 값이 올라가고, 앱과 API는 이 값이 바뀌었을 때만 분석을 다시 돌립니다. 첫 요청 약 2초, 이후 0.2초 안팎입니다.
+- **데모 데이터 판단도 DB 안에서.** 데모 버전을 파일이 아니라 DB(`meta` 테이블)에 남겨서, 컨테이너가 여러 개여도 같은 기준으로 판단합니다. 실제 공장 데이터가 든 DB는 데모로 덮어쓰지 않습니다.
+
+**다음 단계 (계획)**
+1. 로그인과 역할(QC·QA·승인자), 출하 승인 기록과 근거 보존
+2. 설비 데이터 수집기를 별도 서비스로 두고 API로 연동
+3. 사내에서 돌아가는 LLM(RAG·Tool Calling)과 답변 품질 평가
 
 ## 검증
 - Gage R&R 제곱합은 `statsmodels` ANOVA와 1e-9 수준까지 일치 (`tests/test_stats.py`)
@@ -162,7 +223,7 @@ flowchart LR
   M -- 자동 --> P[파싱 + 단위 정규화]
   M -- 새 형식 --> L[매핑 제안 → 확인 → 학습]
   L --> P
-  P --> D[(SQLite)]
+  P --> D[(SQLite / PostgreSQL)]
   D --> E[분석 엔진<br/>MSA·Cpk·SPC·T²·공급사·예측·ANCOVA]
   E --> R[규칙 엔진<br/>config/rules.yaml]
   R --> O[우선 조치 · 8D · SCAR · HTML 보고서]
@@ -179,9 +240,13 @@ mqi/
   engine.py      전체 분석 1회 실행
   qms.py         조치 대장 · 고객 클레임
   outgoing.py    출하 판정 · 출하 CoA
+  oos.py         검사 이력 · OOS 조사 · 재시험
+  db.py          저장소 (SQLite 또는 PostgreSQL)
+api/             REST API (FastAPI)
 app/             Streamlit (한국어/English)
 config/          specs · rules · vocabulary · instruments/*.yaml
-tests/
+tests/           SQLite · PostgreSQL 양쪽에서 실행
+Dockerfile · docker-compose.yml
 ```
 
 ## About
@@ -192,4 +257,4 @@ Taeyang Kim · [github.com/Thisissun93](https://github.com/Thisissun93)
 ---
 
 ### English summary
-An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. Repeat tests never overwrite the first result: a lot whose first result was out of specification stays blocked until an OOS investigation either proves a laboratory error (phase 1) or confirms the failure and sets a disposition (phase 2). All data is synthetic; the test suite checks that every planted problem is found.
+An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. Repeat tests never overwrite the first result: a lot whose first result was out of specification stays blocked until an OOS investigation either proves a laboratory error (phase 1) or confirms the failure and sets a disposition (phase 2). The same analysis also runs as a service: PostgreSQL, a FastAPI REST API and the Streamlit app in Docker Compose, with the full test suite running on both SQLite and PostgreSQL in CI. All data is synthetic; the test suite checks that every planted problem is found.
