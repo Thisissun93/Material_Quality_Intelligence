@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from mqi import config, engine  # noqa: E402
+from mqi import config, db, engine  # noqa: E402
 from mqi.i18n import t as _t  # noqa: E402
 from mqi.insight.rules import LABEL  # noqa: E402
 
@@ -59,9 +59,8 @@ def prop_label(p: str) -> str:
 
 
 def _stamp() -> tuple:
-    db = config.DB_PATH
     cfg = tuple(f.stat().st_mtime for f in config.CONFIG_DIR.glob("*.yaml"))
-    return (db.stat().st_mtime if db.exists() else 0, cfg)
+    return (db.revision(), cfg)
 
 
 @st.cache_resource(show_spinner=False)
@@ -79,7 +78,7 @@ def clear():
 
 
 def has_data() -> bool:
-    return config.DB_PATH.exists() and len(bundle().product) > 0
+    return db.exists() and len(bundle().product) > 0
 
 
 def chip(sev: str) -> str:

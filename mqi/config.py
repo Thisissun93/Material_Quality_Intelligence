@@ -1,6 +1,7 @@
 """Single place that loads YAML settings. Edit YAML, not code."""
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -13,6 +14,11 @@ DATA_DIR = ROOT / "data"
 INBOX_DIR = DATA_DIR / "inbox"
 ARCHIVE_DIR = DATA_DIR / "archive"
 DB_PATH = DATA_DIR / "mqi.sqlite"
+
+
+def database_url() -> str | None:
+    """PostgreSQL URL from MQI_DATABASE_URL (e.g. postgresql://mqi:mqi@db:5432/mqi). None = SQLite file."""
+    return os.environ.get("MQI_DATABASE_URL") or None
 
 
 def _load(name: str) -> dict:

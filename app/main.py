@@ -59,7 +59,7 @@ nav = st.navigation(pages)
 # first visit (e.g. on Streamlit Cloud): build the demo plant so every page has data
 # also after an update that changed the demo scenarios
 from mqi import demo as _demo  # noqa: E402
-if not ui.config.DB_PATH.exists() or _demo.is_stale():
+if not ui.db.exists() or _demo.is_stale():
     with st.spinner("Building demo data…"):
         _demo.build()
     ui.clear()
