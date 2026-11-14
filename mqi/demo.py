@@ -29,7 +29,8 @@ from . import config, db
 GAGE_SEED = 1
 PROC_SEED = 5
 
-RNG = np.random.default_rng(20261111)
+DEMO_SEED = 20261111
+RNG = np.random.default_rng(DEMO_SEED)
 OPS = ["Kim", "Lee", "Park"]
 
 
@@ -46,6 +47,8 @@ def _workdays(start: date, n: int, step: float) -> list[date]:
 
 
 def build_truth() -> dict[str, pd.DataFrame]:
+    global RNG
+    RNG = np.random.default_rng(DEMO_SEED)   # same plant on every build, in any process
     start = date(2026, 5, 4)
     # ---- raw material lots
     resin = []
@@ -396,8 +399,9 @@ def _coa_report(out: Path, r, product: str, grade: str, qty: int, items) -> None
 
 
 # Bump when the planted scenarios change, so a deployed app rebuilds an older demo database.
-DEMO_VERSION = "4"
+DEMO_VERSION = "5"
 OOS_DEMO_LOT = "UF-2610-014"   # the lot whose first result was re-measured without an investigation
+FDC_DEMO_LOT = "UF-2611-003"   # degassed on M1 while its control thermocouple read 5 degC low
 _SIGNATURE = "UF-2609-012"          # a lot that only the demo plant has
 
 
@@ -427,8 +431,39 @@ def build(folder: Path | None = None, dbpath: Path | None = None, ingest: bool =
     res = process_folder(folder, dbpath)
     complaint_no = seed_complaint(dbpath)
     seed_oos_retest(dbpath, complaint_no)
+    seed_equipment(dbpath)
     db.set_meta("demo_version", DEMO_VERSION, dbpath)
     return res
+
+
+def seed_equipment(dbpath=None, n: int = 20) -> int:
+    """Replay the mixer runs of the latest n lots through FDC, as the collector would have reported them.
+
+    Each run uses that lot's MES record (mixer, mix time, vacuum, degas temperature, batch size).
+    FDC_DEMO_LOT was degassed while TC1 read 5 degC low: TC1 stayed on 60 degC, the product reached 65 degC.
+    """
+    from . import fdc
+    from .equipment_model import Fault, Recipe, batch_trace
+
+    pr = db.read("SELECT lot_id, param, value, text FROM process", (), dbpath)
+    if pr.empty:
+        return 0
+    mixer = pr[pr["param"] == "mixer"].set_index("lot_id")["text"]
+    val = pr.dropna(subset=["value"]).pivot_table(index="lot_id", columns="param", values="value")
+    made = db.read("SELECT lot_id, made_at FROM lots WHERE material='product'", (), dbpath).set_index("lot_id")
+    lots = [x for x in db.product_wide(path=dbpath)["lot_id"].tail(n) if x in val.index]
+    for lot in lots:
+        v = val.loc[lot]
+        rec = Recipe(mix_min=float(v.get("mix_time", 45)), degas_temp=float(v.get("degas_temp", 60)),
+                     vacuum=float(v.get("vacuum", 5)), batch_kg=float(v.get("batch_kg", 200)))
+        eq = str(mixer.get(lot, "M1"))
+        fault = Fault("tc1_drift", 5.0) if lot == FDC_DEMO_LOT else None
+        day = str(made["made_at"].get(lot, ""))[:10] or datetime.now().date().isoformat()
+        start = datetime.fromisoformat(day + "T06:00:00")
+        end = start + timedelta(seconds=rec.total_s)
+        fdc.record_run(lot, eq, batch_trace(lot, eq, rec, fault), start.isoformat(), end.isoformat(),
+                       source="replay", dbpath=dbpath)
+    return len(lots)
 
 
 def seed_oos_retest(dbpath=None, complaint_no: str | None = None) -> str | None:

@@ -1,0 +1,44 @@
+# FDC (fault detection & classification) for the planetary mixers.
+# Edit here; the collector sends raw traces and the server applies these rules, so every
+# mixer is judged by the same limits.
+
+sample_period_s: 30          # traces are resampled to this grid before summarising
+
+tags:                         # tag -> (Korean, English, unit)
+  jacket_tc1_c:    [재킷 TC1 (제어), Jacket TC1 (control), "°C"]
+  jacket_tc2_c:    [재킷 TC2 (감시), Jacket TC2 (monitor), "°C"]
+  product_temp_c:  [제품 온도, Product temperature, "°C"]
+  vacuum_mbar:     [진공도, Vacuum, mbar]
+  agitator_rpm:    [교반 속도, Agitator speed, rpm]
+  motor_current_a: [모터 전류, Motor current, A]
+
+steps: [CHARGE, MIX, DEGAS, DISCHARGE]
+step_names:
+  CHARGE:    [투입, Charge]
+  MIX:       [믹싱, Mix]
+  DEGAS:     [탈포, Degas]
+  DISCHARGE: [배출, Discharge]
+
+# Step duration window (min)
+duration_min:
+  MIX:   [40, 55]
+  DEGAS: [20, 35]
+
+# Limits on step summaries. stat: mean | max | min | final (mean of the last 20 % of the step)
+limits:
+  MIX:
+    agitator_rpm:    {stat: mean, lo: 57, hi: 63}
+    motor_current_a: {stat: max, hi: 18}
+    product_temp_c:  {stat: max, hi: 40}
+  DEGAS:
+    product_temp_c:  {stat: max, lo: 57, hi: 62}
+    vacuum_mbar:     {stat: final, hi: 8}
+    agitator_rpm:    {stat: mean, lo: 12, hi: 18}
+
+# Two sensors that should read the same. A controller that trusts one drifting thermocouple
+# keeps its own reading on target while the real temperature runs away: only the comparison shows it.
+dual_sensor:
+  - {a: jacket_tc1_c, b: jacket_tc2_c, steps: [DEGAS], max_diff: 2.0}
+
+# What an alarm does to the release decision of the lot made in that run
+release_effect: hold

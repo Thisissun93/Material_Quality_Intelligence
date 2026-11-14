@@ -5,7 +5,9 @@ import pandas as pd
 import streamlit as st
 
 import ui
-from mqi import config, oos, outgoing
+import plotly.graph_objects as go
+
+from mqi import config, fdc, oos, outgoing
 from mqi.ingest import coa_docs
 
 TONE = {"release": "🟢", "hold": "🟡", "block": "🔴"}
@@ -47,6 +49,7 @@ def render():
         st.dataframe(tbl, hide_index=True, width="stretch",
                      column_config={tbl.columns[1]: st.column_config.NumberColumn(format="%.4g")})
         _history(lot, ko, any(oos_kw in w[1] for w in why for oos_kw in ("OOS", "repeat")))
+        _equipment(lot, ko, any("Equipment alarm" in w[1] for w in why))
         c1, c2, c3 = st.columns([2, 1, 1])
         cust = c1.text_input("고객사" if ko else "Customer", value="Customer A (demo)")
         qty = c2.number_input("수량 kg" if ko else "Qty kg", min_value=0.0, value=200.0, step=20.0)
@@ -183,3 +186,58 @@ def _history(lot: str, ko: bool, expanded: bool):
                     _done(L("재시험 저장", "Retest saved"))
                 except ValueError as e:
                     st.error(str(e))
+
+
+def _equipment(lot: str, ko: bool, expanded: bool):
+    """Equipment runs of the lot from the collector (FDC): alarms and the temperature trend."""
+    L = (lambda k, e: k) if ko else (lambda k, e: e)
+    lang = "ko" if ko else "en"
+    r = fdc.runs(lot)
+    with st.expander(L("설비 이력 (FDC)", "Equipment history (FDC)"), expanded=expanded):
+        if r.empty:
+            st.caption(L("이 로트의 설비 데이터가 없습니다. 수집기가 보낸 런이 여기에 표시됩니다.",
+                         "No equipment data for this lot yet. Runs sent by the collector appear here."))
+            return
+        st.dataframe(pd.DataFrame({
+            "run": r["id"],
+            L("설비", "Equipment"): r["equipment"],
+            L("시작", "Started"): r["started"].astype(str).str[:16].str.replace("T", " "),
+            L("출처", "Source"): r["source"].map(lambda x: {"opcua": "OPC UA", "replay": L("재현", "replay")}.get(x, x)),
+            L("판정", "Result"): r["status"].map(lambda x: {"alarm": L("알람", "Alarm"), "ok": L("정상", "OK"),
+                                                           "incomplete": L("수집 불완전 (판정 안 함)",
+                                                                           "Incomplete (not judged)")}.get(x, x)),
+        }), hide_index=True, width="stretch")
+        pick = r[r["status"] == "alarm"]["id"].tolist() or r["id"].tolist()
+        rid = pick[0] if len(r) == 1 else st.selectbox(
+            "run", r["id"].tolist(), index=r["id"].tolist().index(pick[0]), key=f"run_{lot}")
+        d = fdc.run_detail(int(rid))
+        for _, a in d["alarms"].iterrows():
+            st.error(a["message_ko"] if ko else a["message_en"])
+        tr = d["trace"]
+        if tr.empty:
+            return
+        w = tr.pivot_table(index=["t_s", "step"], columns="tag", values="value").reset_index()
+        w["min"] = w["t_s"] / 60
+        f = ui.fig_base(330)
+        colors = {"jacket_tc1_c": ui.MUTED, "jacket_tc2_c": "#2563eb", "product_temp_c": ui.RED}
+        for tag in ("jacket_tc1_c", "jacket_tc2_c", "product_temp_c"):
+            if tag in w:
+                f.add_trace(go.Scatter(x=w["min"], y=w[tag], name=fdc.tag_label(tag, lang), mode="lines",
+                                       line=dict(color=colors[tag], width=2 if tag != "jacket_tc1_c" else 1.5,
+                                                 dash="dot" if tag == "jacket_tc1_c" else None)))
+        lim = config.fdc()["limits"].get("DEGAS", {}).get("product_temp_c", {})
+        if lim.get("hi") is not None:
+            f.add_hline(y=lim["hi"], line=dict(color=ui.RED, dash="dash", width=1),
+                        annotation_text=L("탈포 제품 온도 상한", "Degas product temp limit"),
+                        annotation_position="bottom left", annotation_font_color=ui.RED)
+        for step, g in w.groupby("step", sort=False):
+            f.add_vrect(x0=g["min"].min(), x1=g["min"].max(), fillcolor="#f3f4f6" if step == "DEGAS" else "white",
+                        opacity=0.5, line_width=0, annotation_text=fdc.step_label(step, lang),
+                        annotation_position="top left")
+        f.update_layout(yaxis_title="°C", xaxis_title=L("공정 시간 (분)", "Process time (min)"),
+                        margin=dict(l=10, r=10, t=50, b=10))
+        st.plotly_chart(f, width="stretch")
+        st.caption(L("TC1은 온도 제어에 쓰이는 센서입니다. TC1만 보면 정상이어도 TC2·제품 온도와 어긋나면 제어 센서 "
+                     "드리프트를 의심합니다.",
+                     "TC1 is the control sensor. If TC1 looks normal but disagrees with TC2 and the product "
+                     "temperature, suspect control-sensor drift."))

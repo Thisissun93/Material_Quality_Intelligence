@@ -235,6 +235,16 @@ def findings(b: engine.Bundle) -> list[Finding]:
                 blocks[0][1], blocks[0][2],
                 "출하 판정 화면에서 OOS 조사 등록 → 1단계 실험실 조사 (재시험 합격만으로 해제 불가)",
                 "Open the OOS investigation on the Release page → phase 1 lab check (a passing retest alone cannot release)"))
+    # ---- equipment runs with FDC alarms (the lot can pass every test and still have been made wrong)
+    from .. import fdc
+    for lot, fl in fdc.flag_table(b.dbpath).items():
+        out.append(_f(
+            f"fdc_{lot}", "FDC", "high",
+            f"로트 {lot}: 생산 설비 이상 이력, 출하 보류", f"Lot {lot}: equipment alarm during production, on hold",
+            fl[0][1], fl[0][2],
+            "출하 판정 화면의 설비 이력에서 TC1·TC2·제품 온도 트렌드 확인 → 센서 교정 확인, 같은 설비의 다음 배치 감시",
+            "Check the TC1/TC2/product temperature trend under Equipment history on the Release page → verify sensor "
+            "calibration, watch the next batches on that mixer"))
     out.sort(key=lambda f: (SEV[f.severity], f.area))
     # ---- open complaints and overdue actions
     from .. import qms

@@ -6,7 +6,7 @@ from io import BytesIO
 import numpy as np
 import pandas as pd
 
-from . import config, oos, qms
+from . import config, fdc, oos, qms
 from .insight.rules import lab, num
 
 METHOD = {"viscosity": "Rotational, 25 °C, 10 rpm", "tg": "DSC midpoint, 10 °C/min", "peak_temp": "DSC, 10 °C/min",
@@ -14,11 +14,13 @@ METHOD = {"viscosity": "Rotational, 25 °C, 10 rpm", "tg": "DSC midpoint, 10 °C
 COMPANY = "MQI Demo Plant"
 
 
-def release_check(b, lot: str, oos_flags: list | None = None) -> tuple[str, list[tuple[str, str]]]:
+def release_check(b, lot: str, oos_flags: list | None = None,
+                  fdc_flags: list | None = None) -> tuple[str, list[tuple[str, str]]]:
     """'release' | 'hold' | 'block' with (ko, en) reasons.
 
     Values in b.product are the reportable results. The test history is checked as well, so a lot
-    whose first result failed is not released just because a retest passed (see mqi.oos).
+    whose first result failed is not released just because a retest passed (see mqi.oos), and a lot
+    made in an equipment run with an FDC alarm goes to QA hold (see mqi.fdc).
     """
     spec = config.specs()["product"]["properties"]
     row = b.product[b.product["lot_id"] == lot]
@@ -43,7 +45,9 @@ def release_check(b, lot: str, oos_flags: list | None = None) -> tuple[str, list
         reasons.append(("다변량 T² 이상 (조합 이상)", "Multivariate T² alarm (unusual combination)"))
         level = "hold" if level == "release" else level
     rank = {"release": 0, "hold": 1, "block": 2}
-    for lv, ko, en in (oos.flags(lot, b.dbpath) if oos_flags is None else oos_flags):
+    extra = (oos.flags(lot, b.dbpath) if oos_flags is None else oos_flags) + \
+            (fdc.flags(lot, b.dbpath) if fdc_flags is None else fdc_flags)
+    for lv, ko, en in extra:
         reasons.append((ko, en))
         level = max(level, lv, key=rank.get)
     cc = qms.complaints(b.dbpath)
@@ -118,9 +122,9 @@ def pdf(b, lot: str, customer: str, qty_kg: float = 200, po: str = "", draft: bo
 
 def batch_status(b, n: int = 30) -> pd.DataFrame:
     """Release status of the latest n lots."""
-    out, ft = [], oos.flag_table(b.dbpath)
+    out, ft, fd = [], oos.flag_table(b.dbpath), fdc.flag_table(b.dbpath)
     for lot in b.product["lot_id"].tail(n)[::-1]:
-        lvl, why = release_check(b, lot, ft.get(lot, []))
+        lvl, why = release_check(b, lot, ft.get(lot, []), fd.get(lot, []))
         out.append(dict(lot_id=lot, status=lvl, reasons=why))
     return pd.DataFrame(out)
 

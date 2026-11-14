@@ -26,6 +26,7 @@
 | 보고서는 사람이 작성 | 데이터로 채운 **표준 8D(D0–D8)·SCAR** 자동 작성: 5W2H·IS/IS NOT, 발생/유출 원인 분리, 6M 검증, 원료 한계 재계산 (한/영, A4·Excel) |
 | 결과만 보여 줌 | 재고 원료 조합별 **다음 배치 이탈 확률**을 예측해 사용할 조합을 추천 |
 | 조치는 엑셀로 따로 관리 | 8D·SCAR 조치를 **담당·기한·상태**로 추적하고, 상태가 8D D5·D6에 자동 반영 |
+| 설비 데이터는 따로 보고, 검사 합격이면 출하 | 믹서 데이터를 **OPC UA로 자동 수집**해 Step별 FDC 판정. 검사는 합격이어도 설비 이상 이력이 있으면 출하 보류 |
 | 재시험 합격이면 그대로 출하 | 최초 결과를 지우지 않고 보존, **OOS 조사**(1단계 실험실 → 2단계 제조)가 끝나기 전에는 출하·성적서 발행 차단 |
 | 출하 성적서는 수기 작성 | 출하 판정(가능/보류/불가)을 통과한 로트만 **출하 CoA PDF** 발행 |
 
@@ -39,7 +40,8 @@
 | 4 | 원료→제품 예측 | 원인 기여도 1순위 D50, 재고 원료 조합별 이탈 확률 |
 | 5 | 보고서 | 데이터로 채운 8D (출발점을 고객 클레임으로 바꿔 보기) → "조치 등록" |
 | 6 | 조치·클레임 / 출하 판정·성적서 | 등록된 조치의 상태 관리, 보류 로트와 출하 CoA 발행 |
-| 7 | 출하 판정·성적서 → **UF-2610-014** | 첫 점도 4,640(이탈) → 재측정 3,484(합격)인데도 출하 불가. `검사 이력 · OOS 조사 · 재시험`에서 조사 등록 → 1단계 종결까지 직접 진행 |
+| 7 | 출하 판정·성적서 → **UF-2610-014** | 첫 점도 4,640(이탈) → 재측정은 합격인데도 출하 불가. `검사 이력 · OOS 조사 · 재시험`에서 조사 등록 → 1단계 종결까지 직접 진행 |
+| 8 | 출하 판정·성적서 → **UF-2611-003** | 검사는 모두 합격인데 보류. `설비 이력 (FDC)`에서 TC1만 60℃를 유지하는 동안 TC2·제품 온도가 65℃를 넘은 트렌드 확인 |
 
 ## 핵심 기능
 
@@ -117,6 +119,21 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 
 ![oos](docs/img/oos.png)
 
+#### 설비 데이터 자동 수집과 FDC
+검사 결과만으로는 "어떻게 만들어졌는지"를 알 수 없습니다. 믹서가 OPC UA로 내보내는 데이터를 수집기가 배치 단위로 모아 보내면, 서버가 레시피 Step(투입·믹싱·탈포·배출)별로 요약하고 `config/fdc.yaml` 기준으로 판정합니다.
+
+| 판정 | 예 |
+|---|---|
+| Step 시간 | 믹싱 40~55분을 벗어나면 알람 |
+| Step 요약값 한계 | 탈포 중 제품 온도 최고값 57~62℃, 탈포 종료 진공도 8 mbar 이하 |
+| **이중 센서 비교** | 탈포 중 재킷 TC1(제어)과 TC2(감시)의 차이 2.0℃ 이하 |
+
+이중 센서 비교가 핵심입니다. 제어용 TC1이 낮게 읽히면 컨트롤러는 TC1을 설정값에 맞추느라 실제 온도를 올립니다. **TC1 차트만 보면 완벽하게 정상**이고, TC2와 제품 온도를 함께 봐야 보입니다. 이 경우 알람은 원인(센서 편차)을 먼저, 결과(제품 온도 상한 이탈)를 뒤에 표시합니다.
+
+알람이 난 런에서 만든 로트는 출하 판정이 **보류(QA 판단)**가 됩니다. 수집기가 배치 도중에 연결돼 앞부분을 놓친 런은 '수집 불완전'으로 저장만 하고 판정하지 않습니다. 수집 공백을 설비 이상으로 오인해 멀쩡한 로트를 막지 않기 위해서입니다.
+
+![fdc](docs/img/fdc.png)
+
 ## 데모 데이터에 심어 둔 문제와 앱이 찾은 결과
 
 | 심어 둔 문제 | 앱의 판단 |
@@ -130,15 +147,16 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 | KoPolymer는 8로트뿐, Ppk 0.77 | 신뢰구간 0.30–1.23 → "판정 보류(데이터 부족)", 강화 판정하지 않음 |
 | 고객 클레임 1건: 규격 내지만 점도 상위 로트 | 클레임 기준 8D, 해당 로트 출하 판정 "보류" |
 | 최근 로트 1건: 첫 점도 4,640 mPa·s(USL 4,500, 측정자 Park) → 같은 시료 재측정 합격, OOS 조사 없음 | 재측정값으로 분석하되 최초 결과를 보존하고 "출하 불가: OOS 조사 필요" |
+| 최근 20개 로트의 믹서 런 중 UF-2611-003: 탈포 중 TC1이 5℃ 낮게 읽힘 (TC1은 60℃ 유지, 실제 65℃) | 20개 런 중 이 런만 알람(오알람 0), 원인 "TC1·TC2 편차 5.5℃", 출하 판정 보류 |
 
-위 결과는 `tests/`의 테스트 50개가 커밋마다 GitHub Actions에서 SQLite와 PostgreSQL 두 DB로 확인합니다.
+위 결과는 `tests/`의 테스트 62개가 커밋마다 GitHub Actions에서 SQLite와 PostgreSQL 두 DB로 확인합니다.
 
 ## 실행
 
 ```bash
 pip install -r requirements.txt
 streamlit run app/main.py       # 첫 실행 시 데모 데이터를 자동 생성 (SQLite 파일)
-pytest -q                       # 테스트 50개 (API 테스트는 requirements-api.txt 설치 시)
+pytest -q                       # 테스트 62개 (API 테스트는 requirements-api.txt 설치 시)
 ```
 
 | 하고 싶은 일 | 방법 |
@@ -162,7 +180,11 @@ docker compose up --build
 flowchart LR
   subgraph clients[사용하는 쪽]
     U[품질 담당자<br/>Streamlit 앱]
-    X[다른 시스템<br/>MES · LIMS · 설비 수집기]
+    X[다른 시스템<br/>MES · LIMS]
+  end
+  subgraph floor[현장]
+    EQ[믹서 M1·M2<br/>OPC UA 서버]
+    COL[수집기<br/>배치 분할 · store-and-forward]
   end
   subgraph svc[MQI 서비스]
     API[REST API<br/>FastAPI]
@@ -173,6 +195,8 @@ flowchart LR
   INIT[init<br/>스키마·데모 생성]
   U --> APP
   X -- HTTP/JSON --> API
+  EQ -- OPC UA --> COL
+  COL -- HTTP/JSON --> API
   APP --> CORE
   API --> CORE
   CORE --> DB
@@ -185,6 +209,8 @@ flowchart LR
 | `init` | 시작할 때 한 번 실행. DB가 비어 있으면 스키마와 데모 공장을 만들고 종료. 실제 공장 데이터가 있으면 손대지 않음 |
 | `api` | REST API (`/docs`에서 바로 호출 가능), 상태 확인 `/health` |
 | `app` | 같은 DB를 보는 Streamlit 앱. API로 등록한 OOS 조사가 화면에 바로 반영됨 |
+| `equipment` | 믹서 M1·M2 시뮬레이터 (OPC UA 서버, `opc.tcp://localhost:4840/mqi/`). 시간 60배속이라 90분 배치가 90초. UaExpert 같은 OPC UA 클라이언트로 직접 태그를 볼 수 있음 |
+| `collector` | 믹서를 읽어 배치 단위로 잘라 API로 전송. API가 멈춰 있으면 디스크에 쌓아 두었다가 순서대로 다시 보냄 |
 
 **주요 API**
 
@@ -196,18 +222,23 @@ flowchart LR
 | POST | `/api/v1/lots/{lot}/retests` | 재시험 등록 (이탈 결과에 OOS 조사가 없으면 409로 거절) |
 | POST | `/api/v1/oos` | OOS 조사 등록 |
 | POST | `/api/v1/oos/{no}/phase1` · `/phase2` | 실험실 조사 · 제조 조사 종결 |
+| POST | `/api/v1/equipment/runs` | 설비 런 수신 (원시 트레이스) → 서버가 FDC 판정 |
+| GET | `/api/v1/equipment/runs/{id}?trace=true` | Step별 요약, 알람, 트레이스 |
 | GET | `/api/v1/findings` | 개요 화면의 우선 조치 목록 |
 
 **설계에서 정한 것**
-- **SQLite와 PostgreSQL을 모두 지원.** `MQI_DATABASE_URL`이 있으면 PostgreSQL, 없으면 SQLite 파일입니다. SQL 변환은 `mqi/db.py` 한 곳에서만 하고 분석 코드는 그대로 둡니다. 덕분에 Streamlit Cloud 데모는 계속 SQLite로 돌고, 테스트 50개는 CI에서 두 DB로 각각 실행됩니다.
+- **SQLite와 PostgreSQL을 모두 지원.** `MQI_DATABASE_URL`이 있으면 PostgreSQL, 없으면 SQLite 파일입니다. SQL 변환은 `mqi/db.py` 한 곳에서만 하고 분석 코드는 그대로 둡니다. 덕분에 Streamlit Cloud 데모는 계속 SQLite로 돌고, 테스트 62개는 CI에서 두 DB로 각각 실행됩니다.
 - **업무 규칙 위반은 409, 입력 형식 오류는 422.** 예를 들어 OOS 조사 없이 재시험을 넣으면 409와 이유를 돌려줍니다. 호출하는 시스템이 무엇을 고쳐야 하는지 알 수 있게 하기 위해서입니다.
 - **분석은 데이터가 바뀔 때만 다시 계산.** 쓰기가 일어날 때마다 DB의 `rev` 값이 올라가고, 앱과 API는 이 값이 바뀌었을 때만 분석을 다시 돌립니다. 첫 요청 약 2초, 이후 0.2초 안팎입니다.
+- **FDC 판정은 서버 한 곳에서.** 수집기는 통신·배치 분할·전송만 하고, Step 요약과 판정은 서버가 `config/fdc.yaml`로 합니다. 설비가 늘어도 기준이 한 곳에 있어 판정이 일관되고, 기준을 바꿔도 수집기를 다시 배포할 필요가 없습니다.
+- **데이터를 잃지 않는 수집.** API가 멈추면 수집기가 배치를 디스크(spool)에 쌓고, 복구되면 오래된 것부터 순서대로 보냅니다. OPC UA 연결이 끊기면 5초마다 다시 연결합니다. 실제로 API를 내린 상태에서 끝난 배치 2개가 복구 후 순서대로 전달되고 판정된 것을 확인했습니다.
+- **수집 공백과 설비 이상을 구분.** 배치 시작 후 2분(공정 시간)이 지나 연결된 런은 '수집 불완전'으로 두고 판정하지 않습니다.
 - **데모 데이터 판단도 DB 안에서.** 데모 버전을 파일이 아니라 DB(`meta` 테이블)에 남겨서, 컨테이너가 여러 개여도 같은 기준으로 판단합니다. 실제 공장 데이터가 든 DB는 데모로 덮어쓰지 않습니다.
 
 **다음 단계 (계획)**
 1. 로그인과 역할(QC·QA·승인자), 출하 승인 기록과 근거 보존
-2. 설비 데이터 수집기를 별도 서비스로 두고 API로 연동
-3. 사내에서 돌아가는 LLM(RAG·Tool Calling)과 답변 품질 평가
+2. 사내에서 돌아가는 LLM(RAG·Tool Calling)과 답변 품질 평가
+3. SECS/GEM(반도체 장비 표준) 수집 추가
 
 ## 검증
 - Gage R&R 제곱합은 `statsmodels` ANOVA와 1e-9 수준까지 일치 (`tests/test_stats.py`)
@@ -241,10 +272,14 @@ mqi/
   qms.py         조치 대장 · 고객 클레임
   outgoing.py    출하 판정 · 출하 CoA
   oos.py         검사 이력 · OOS 조사 · 재시험
+  fdc.py         설비 런 Step 요약 · FDC 판정 · 출하 연동
+  equipment_model.py  믹서 배치 모델 (시뮬레이터와 데모가 공유)
   db.py          저장소 (SQLite 또는 PostgreSQL)
 api/             REST API (FastAPI)
+equipment/       OPC UA 믹서 시뮬레이터
+collector/       OPC UA 수집기 (배치 분할 · store-and-forward)
 app/             Streamlit (한국어/English)
-config/          specs · rules · vocabulary · instruments/*.yaml
+config/          specs · rules · fdc · vocabulary · instruments/*.yaml
 tests/           SQLite · PostgreSQL 양쪽에서 실행
 Dockerfile · docker-compose.yml
 ```
@@ -257,4 +292,4 @@ Taeyang Kim · [github.com/Thisissun93](https://github.com/Thisissun93)
 ---
 
 ### English summary
-An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. Repeat tests never overwrite the first result: a lot whose first result was out of specification stays blocked until an OOS investigation either proves a laboratory error (phase 1) or confirms the failure and sets a disposition (phase 2). The same analysis also runs as a service: PostgreSQL, a FastAPI REST API and the Streamlit app in Docker Compose, with the full test suite running on both SQLite and PostgreSQL in CI. All data is synthetic; the test suite checks that every planted problem is found.
+An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. Repeat tests never overwrite the first result: a lot whose first result was out of specification stays blocked until an OOS investigation either proves a laboratory error (phase 1) or confirms the failure and sets a disposition (phase 2). Mixer data is collected over OPC UA by a separate collector (batch cutting, store-and-forward) and judged per recipe step on the server, including dual-sensor agreement that catches a drifting control thermocouple; an alarmed run puts its lot on QA hold. The same analysis also runs as a service: PostgreSQL, a FastAPI REST API, the Streamlit app, an OPC UA equipment simulator and the collector in Docker Compose, with the full test suite running on both SQLite and PostgreSQL in CI. All data is synthetic; the test suite checks that every planted problem is found.
