@@ -396,7 +396,8 @@ def _coa_report(out: Path, r, product: str, grade: str, qty: int, items) -> None
 
 
 # Bump when the planted scenarios change, so a deployed app rebuilds an older demo database.
-DEMO_VERSION = "3"
+DEMO_VERSION = "4"
+OOS_DEMO_LOT = "UF-2610-014"   # the lot whose first result was re-measured without an investigation
 _SIGNATURE = "UF-2609-012"          # a lot that only the demo plant has
 
 
@@ -447,7 +448,9 @@ def seed_oos_retest(dbpath=None, complaint_no: str | None = None) -> str | None:
         skip.add(c["lot_id"])
     cand = p.tail(15)
     cand = cand[~cand["lot_id"].isin(skip)]
-    lot = cand.iloc[(cand["viscosity"] - 3500).abs().argsort()].iloc[0]
+    # fixed lot so the README tour points at the same lot everywhere; fall back to the most typical recent lot
+    fixed = cand[cand["lot_id"] == OOS_DEMO_LOT]
+    lot = fixed.iloc[0] if len(fixed) else cand.iloc[(cand["viscosity"] - 3500).abs().argsort()].iloc[0]
     with db.connect(dbpath) as con:
         row = con.execute("SELECT measured_at, unit, instrument, profile FROM measurements WHERE lot_id=? AND "
                           "property='viscosity' AND source='inhouse'", (lot["lot_id"],)).fetchone()

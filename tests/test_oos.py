@@ -31,6 +31,7 @@ def test_demo_plants_an_oos_retested_without_investigation(bundle):
     twice = h.groupby("lot_id").size().loc[lambda s: s > 1].index
     assert len(twice) == 1
     lot = twice[0]
+    assert lot == "UF-2610-014"                       # the lot the README tour points at
     hist = oos.history(lot, "viscosity", bundle.dbpath)
     assert list(hist["attempt"]) == ["initial", "remeasure"]
     assert hist["oos"].tolist() == [True, False]
