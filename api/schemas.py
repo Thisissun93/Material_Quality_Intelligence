@@ -108,3 +108,54 @@ class Finding(BaseModel):
     title: dict[str, str]
     evidence: dict[str, str]
     action: dict[str, str]
+
+
+class TraceSample(BaseModel):
+    t_s: float = Field(description="Process time since batch start (s)")
+    step: str
+    tag: str
+    value: float
+
+
+class EquipmentRunIn(BaseModel):
+    lot_id: str = Field(min_length=1)
+    equipment: str = Field(min_length=1)
+    started: str | None = None
+    ended: str | None = None
+    source: str = "opcua"
+    complete: bool = Field(True, description="False if the collector joined after the batch started")
+    samples: list[TraceSample] = Field(min_length=1, description="Raw trace; the server resamples and judges it")
+
+
+class FdcAlarm(BaseModel):
+    step: str
+    rule: str
+    tag: str
+    value: float | None
+    lim: float | None
+    message_ko: str
+    message_en: str
+
+
+class EquipmentRunResult(BaseModel):
+    id: int
+    status: Literal["ok", "alarm", "incomplete"]
+    alarms: list[FdcAlarm]
+
+
+class EquipmentRun(BaseModel):
+    id: int
+    lot_id: str
+    equipment: str
+    started: str | None
+    ended: str | None
+    source: str | None
+    received: str | None
+    samples: int | None
+    status: str
+
+
+class EquipmentRunDetail(EquipmentRun):
+    summary: list[dict]
+    alarms: list[FdcAlarm]
+    trace: list[dict] | None = None

@@ -70,6 +70,22 @@ CREATE TABLE IF NOT EXISTS ingest_log (
     at TEXT, file TEXT, kind TEXT, profile TEXT, confidence REAL,
     rows INTEGER, status TEXT, note TEXT
 );
+-- Equipment runs reported by the collector (or replayed by the demo). The server summarises each
+-- recipe step and applies config/fdc.yaml, so every mixer is judged by the same rules.
+CREATE TABLE IF NOT EXISTS equipment_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, lot_id TEXT, equipment TEXT, started TEXT, ended TEXT,
+    source TEXT, received TEXT, samples INTEGER, status TEXT     -- ok | alarm | incomplete
+);
+CREATE TABLE IF NOT EXISTS fdc_summary (
+    run_id INTEGER, step TEXT, tag TEXT, n INTEGER, mean REAL, min REAL, max REAL, final REAL,
+    slope_per_min REAL, duration_min REAL
+);
+CREATE TABLE IF NOT EXISTS fdc_alarms (
+    run_id INTEGER, step TEXT, rule TEXT, tag TEXT, value REAL, lim REAL, message_ko TEXT, message_en TEXT
+);
+CREATE TABLE IF NOT EXISTS equipment_trace (
+    run_id INTEGER, t_s REAL, step TEXT, tag TEXT, value REAL
+);
 -- key/value: demo_version (which demo build created the data), rev (bumped on every write)
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY, value TEXT

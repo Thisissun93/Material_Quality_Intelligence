@@ -37,7 +37,7 @@ jobs:
       - run: pytest -q
 
   compose:
-    name: docker compose (PostgreSQL + API + app)
+    name: docker compose (PostgreSQL + API + app + OPC UA collector)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,5 +53,14 @@ jobs:
         run: |
           curl -fs "localhost:8000/api/v1/lots?status=block" | grep -q OOS
           curl -fs -o /dev/null localhost:8501
+      - name: equipment data arrives over OPC UA
+        run: |
+          for i in $(seq 1 80); do
+            n=$(curl -fs "localhost:8000/api/v1/equipment/runs?source=opcua" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+            [ "$n" -ge 2 ] && break
+            sleep 5
+          done
+          curl -fs "localhost:8000/api/v1/equipment/runs?source=opcua"
+          [ "$n" -ge 2 ]
       - if: failure()
         run: docker compose logs

@@ -17,11 +17,14 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from mqi import __version__, config, db, demo, engine, oos, outgoing
+import pandas as pd
+
+from mqi import __version__, config, db, demo, engine, fdc, oos, outgoing
 from mqi.insight import rules
 
-from .schemas import (Finding, Health, HistoryRow, Investigation, LotStatus, OpenInvestigation, Phase1, Phase2,
-                      Reason, ReleaseDetail, Retest)
+from .schemas import (EquipmentRun, EquipmentRunDetail, EquipmentRunIn, EquipmentRunResult, FdcAlarm, Finding, Health,
+                      HistoryRow, Investigation, LotStatus, OpenInvestigation, Phase1, Phase2, Reason, ReleaseDetail,
+                      Retest)
 
 app = FastAPI(
     title="Material Quality Intelligence API",
@@ -178,6 +181,39 @@ def phase2(no: str, body: Phase2):
     _inv(no)
     oos.record_phase2(no, body.finding, body.disposition, body.by)
     return _inv(no)
+
+
+# ---------------------------------------------------------------- equipment / FDC
+
+def _rec(d: dict) -> dict:
+    return {k: _clean(v) for k, v in d.items()}
+
+
+@app.post("/api/v1/equipment/runs", response_model=EquipmentRunResult, status_code=201, tags=["equipment"])
+def post_run(body: EquipmentRunIn):
+    """Receive one equipment run (raw trace) from a collector. The server resamples it, summarises every recipe
+    step, applies config/fdc.yaml and stores the result. An alarm puts the lot on QA hold. A run the collector
+    joined half-way (complete=false) is stored as 'incomplete' and not judged."""
+    trace = pd.DataFrame([s.model_dump() for s in body.samples])
+    r = fdc.record_run(body.lot_id, body.equipment, trace, body.started, body.ended, body.source, body.complete)
+    return EquipmentRunResult(id=r["id"], status=r["status"], alarms=[FdcAlarm(**_rec(a)) for a in r["alarms"]])
+
+
+@app.get("/api/v1/equipment/runs", response_model=list[EquipmentRun], tags=["equipment"])
+def list_runs(lot_id: str | None = None, status: str | None = Query(None, pattern="^(ok|alarm|incomplete)$"),
+              source: str | None = None, limit: int = Query(100, ge=1, le=1000)):
+    return [EquipmentRun(**_rec(r)) for r in fdc.runs(lot_id, status, source, limit).to_dict("records")]
+
+
+@app.get("/api/v1/equipment/runs/{run_id}", response_model=EquipmentRunDetail, tags=["equipment"])
+def get_run(run_id: int, trace: bool = False):
+    d = fdc.run_detail(run_id)
+    if not d:
+        raise HTTPException(404, f"run {run_id} not found")
+    return EquipmentRunDetail(**_rec(d["run"]),
+                              summary=[_rec(r) for r in d["summary"].drop(columns="run_id").to_dict("records")],
+                              alarms=[FdcAlarm(**_rec(a)) for a in d["alarms"].drop(columns="run_id").to_dict("records")],
+                              trace=[_rec(r) for r in d["trace"].to_dict("records")] if trace else None)
 
 
 # ---------------------------------------------------------------- overview

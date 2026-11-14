@@ -1,4 +1,4 @@
-# PostgreSQL + REST API + Streamlit app.   docker compose up --build
+# PostgreSQL + REST API + Streamlit app + equipment (OPC UA) + collector.   docker compose up --build
 #   API docs  http://localhost:8000/docs
 #   App       http://localhost:8501
 x-mqi: &mqi
@@ -55,5 +55,36 @@ services:
       init:
         condition: service_completed_successfully
 
+  # two planetary mixers publishing over OPC UA (accelerated x60: a 90-min batch takes 90 s)
+  equipment:
+    <<: *mqi
+    command: ["python", "-m", "equipment.opcua_sim"]
+    environment:
+      SIM_ENDPOINT: opc.tcp://0.0.0.0:4840/mqi/
+      SIM_MIXERS: M1,M2
+      SIM_ACCEL: "60"
+      SIM_LOTS: auto              # the newest lots in MQI, then simulator-only lot numbers
+      MQI_API_URL: http://api:8000
+    ports: ["4840:4840"]          # connect UaExpert or any OPC UA client to opc.tcp://localhost:4840/mqi/
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # reads the mixers, cuts batches and posts them to the API; spools to disk while the API is down
+  collector:
+    <<: *mqi
+    command: ["python", "-m", "collector.main"]
+    environment:
+      OPCUA_ENDPOINT: opc.tcp://equipment:4840/mqi/
+      EQUIPMENT: M1,M2
+      MQI_API_URL: http://api:8000
+      POLL_S: "0.5"
+      SPOOL_DIR: /app/spool
+    volumes:
+      - spool:/app/spool
+    depends_on:
+      - equipment
+
 volumes:
   pgdata:
+  spool:

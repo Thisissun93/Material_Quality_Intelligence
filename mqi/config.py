@@ -51,6 +51,12 @@ def plausible_range(prop: str) -> tuple[float, float] | None:
     return tuple(r) if r else None
 
 
+@lru_cache(maxsize=None)
+def fdc() -> dict:
+    return _load("fdc.yaml")
+
+
 def reload() -> None:
     specs.cache_clear()
     rules.cache_clear()
+    fdc.cache_clear()

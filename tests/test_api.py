@@ -1,26 +1,7 @@
 """REST API: the same rules as the app, reachable over HTTP."""
 import pytest
 
-fastapi = pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
-
-
-@pytest.fixture()
-def client(demo, tmp_path, monkeypatch):
-    """API on a private copy of the demo store (SQLite file or PostgreSQL database)."""
-    from conftest import clone_store
-    from mqi import config
-
-    store = clone_store(demo["db"], tmp_path)
-    if str(store).startswith("postgres"):
-        monkeypatch.setenv("MQI_DATABASE_URL", str(store))
-    else:
-        monkeypatch.delenv("MQI_DATABASE_URL", raising=False)
-        monkeypatch.setattr(config, "DB_PATH", store)
-    from api import main
-
-    main._cache.clear()
-    return TestClient(main.app)
+pytest.importorskip("fastapi")
 
 
 def _blocked_oos_lot(c):
