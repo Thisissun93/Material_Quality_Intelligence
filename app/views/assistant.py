@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 
 import streamlit as st
@@ -38,9 +39,44 @@ def _settings(ko: bool) -> str:
     return b
 
 
+_SRC = re.compile(r"\s*\[((?:lot|lots|history|equipment|oos|SPEC|SOP|WI|findings)[^\[\]]*)\]", re.I)
+_KIND = {"lot": ("출하 판정", "Release check"), "history": ("검사 이력", "Test history"),
+         "equipment": ("설비 이력", "Equipment runs"), "lots": ("로트 목록", "Lot list"),
+         "oos": ("OOS 조사", "OOS investigations"), "findings": ("우선 조치", "Priority findings")}
+
+
+def _label(sid: str, ko: bool) -> str:
+    kind, _, rest = sid.partition(":")
+    name = _KIND.get(kind.lower())
+    return f"{name[0 if ko else 1]} {rest}".strip() if name and rest else sid
+
+
+def _cite(text: str, ko: bool) -> tuple[str, list[str]]:
+    """Source tags in the answer become small numbers; the sources are listed once under the answer.
+    (The tags stay in the stored answer: the grounding check reads them.)"""
+    ids: list[str] = []
+
+    def rep(m):
+        nums = []
+        for sid in (x.strip() for x in re.split(r"[,;]", m.group(1)) if x.strip()):
+            if sid.lower() not in [x.lower() for x in ids]:
+                ids.append(sid)
+            n = [x.lower() for x in ids].index(sid.lower()) + 1
+            if n not in nums:
+                nums.append(n)
+        return "<sup>" + ",".join(map(str, nums)) + "</sup>"
+    out = _SRC.sub(rep, text)
+    out = re.sub(r"\n(\*\*)", r"\n\n\1", out)      # a bold heading after a list starts a new block
+    return out, ids
+
+
 def _show(a: dict, ko: bool):
     L = (lambda k, e: k) if ko else (lambda k, e: e)
-    st.markdown(a["text"] or "—")
+    body, ids = _cite(a["text"] or "—", ko)
+    st.markdown(body.replace("\n", "  \n") if not re.search(r"^\s*- ", body, re.M) else body,
+                unsafe_allow_html=True)
+    if ids:
+        st.caption(L("출처 ", "Sources ") + " · ".join(f"{i}) {_label(x, ko)}" for i, x in enumerate(ids, 1)))
     g = a["grounding"]
     if a.get("error"):
         st.warning(a["error"])

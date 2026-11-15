@@ -169,7 +169,24 @@ def gather(ans: Answer, question: str, dbpath=None) -> None:
         if re.search(r"규격|spec", question, re.I) and prop:
             _call(ans, "get_spec", dbpath, property=prop)
     if not ans.tool_calls or _HOW.search(question):
-        _call(ans, "search_documents", dbpath, query=question if ans.lang == "ko" else question + " 절차 기준")
+        _call(ans, "search_documents", dbpath, query=_doc_query(ans, question))
+
+
+def _doc_query(ans: Answer, question: str) -> str:
+    """For a question about a lot, look for the procedure that fits the lot's state rather than the question's
+    wording ("can it ship?" otherwise finds the release SOP's scope paragraph)."""
+    rel = next((c.result for c in ans.tool_calls if c.name == "get_lot_release" and "error" not in c.result), None)
+    if rel:
+        why = " ".join(rel["reasons"])
+        if "설비" in why or "Equipment" in why:
+            return "설비 알람 품질 판단 출하 보류 로트"
+        if "OOS" in why or "repeat" in why:
+            return "OOS 재시험 전 조사 등록"
+        if rel["level"] == "hold":
+            return "보류 해제 QA 승인 판단 근거"
+        if rel["level"] == "release":
+            return "출하 승인 서명 성적서 발행"
+    return question if ans.lang == "ko" else question + " 절차 기준"
 
 
 # ---------------------------------------------------------------- offline (rule-based baseline)
@@ -197,40 +214,53 @@ def ask_offline(question: str, dbpath=None) -> Answer:
         _refusal(ans, g, dbpath)
         return _finish(ans, t0, refusal=True)
     gather(ans, question, dbpath)
-    parts: list[str] = []
+    # one line per fact, the lot's verdict first; each line keeps its source for the grounding check
+    lines: list[str] = []
+    eq_fetched = any(c.name == "get_equipment_runs" for c in ans.tool_calls)
     for c in ans.tool_calls:
         r = c.result
         if c.name == "get_lot_release":
             lot = c.args["lot_id"]
             if "error" in r:
-                parts.append(f"{lot} 로트를 찾을 수 없습니다. [{c.source}]" if ko else f"Lot {lot} was not found. [{c.source}]")
+                lines.append(f"{lot} 로트를 찾을 수 없습니다. [{c.source}]" if ko else f"Lot {lot} was not found. [{c.source}]")
                 continue
-            why = "; ".join(r["reasons"]) if r["reasons"] else ("보류·불가 사유 없음" if ko else "no reason to hold")
-            parts.append(f"{lot}: {r['status']} — {why} [{c.source}]")
+            lines.append(f"**{lot}: {r['status']}** [{c.source}]")
+            why = [x for x in r["reasons"]
+                   if not (eq_fetched and (x.startswith("설비 이상") or x.startswith("Equipment alarm")))]
+            for x in why:
+                lines.append(f"- {x} [{c.source}]")
+            if not r["reasons"]:
+                lines.append(f"- {'보류·불가 사유 없음' if ko else 'no reason to hold'} [{c.source}]")
             if re.search(r"값|얼마|결과|value|result", question, re.I):
-                parts.append(", ".join(f"{k} {v}" for k, v in r["reportable_values"].items()) + f" [{c.source}]")
+                lines.append("- " + ", ".join(f"{k} {v}" for k, v in r["reportable_values"].items()) + f" [{c.source}]")
         elif c.name == "get_test_history":
             for x in [x for x in r.get("results", []) if x["out_of_spec"] or x["test"] > 1][:4]:
                 tag = (" 규격 이탈" if ko else " out of spec") if x["out_of_spec"] else ""
                 inv = (" 무효" if ko else " invalidated") if x["invalidated"] else ""
-                parts.append((f"{x['property']} {x['test']}차 {x['type']} {x['value']:g} {x['unit']}{tag}{inv}" if ko else
-                              f"{x['property']} test {x['test']} ({x['type']}) {x['value']:g} {x['unit']}{tag}{inv}")
+                lines.append("- " + (f"{x['property']} {x['test']}차 {x['type']} {x['value']:g} {x['unit']}{tag}{inv}" if ko else
+                                     f"{x['property']} test {x['test']} ({x['type']}) {x['value']:g} {x['unit']}{tag}{inv}")
                              + f" [{c.source}]")
         elif c.name == "get_equipment_runs":
             for run in r.get("runs", [])[:2]:
-                msg = "; ".join(run["alarms"]) or ("알람 없음" if ko else "no alarm")
-                parts.append(f"{run['equipment']} run {run['run']}: {msg} [{c.source}]")
+                if not run["alarms"]:
+                    lines.append(f"- {run['equipment']} run {run['run']}: {'알람 없음' if ko else 'no alarm'} [{c.source}]")
+                for al in run["alarms"]:
+                    lines.append(f"- {run['equipment']} run {run['run']}: {al} [{c.source}]")
         elif c.name == "list_lots":
             ids = [x["lot_id"] for x in r["lots"]]
-            parts.append((f"최근 40개 로트 중 {len(ids)}개: " if ko else f"{len(ids)} of the latest 40 lots: ")
+            lines.append((f"최근 40개 로트 중 {len(ids)}개: " if ko else f"{len(ids)} of the latest 40 lots: ")
                          + (", ".join(ids) or "-") + f" [{c.source}]")
         elif c.name == "get_spec":
             for k, v in r.items():
-                parts.append(f"{k} {v['lsl']:,}~{v['usl']:,} {v['unit']}, " + ("목표" if ko else "target")
+                lines.append(f"- {k} {v['lsl']:,}~{v['usl']:,} {v['unit']}, " + ("목표" if ko else "target")
                              + f" {v['target']:,} [{c.source}]")
         elif c.name == "search_documents":
-            parts += _doc_sentences(r, 2) or ["관련 문서를 찾지 못했습니다." if ko else "No matching procedure was found."]
-    ans.text = " ".join(parts)
+            docs = _doc_sentences(r, 2)
+            if docs and len(ans.tool_calls) > 1:
+                lines.append("**절차**" if ko else "**Procedure**")
+            lines += [f"- {d}" if len(ans.tool_calls) > 1 else d for d in docs] or \
+                ["관련 문서를 찾지 못했습니다." if ko else "No matching procedure was found."]
+    ans.text = "\n".join(lines)
     return _finish(ans, t0)
 
 
