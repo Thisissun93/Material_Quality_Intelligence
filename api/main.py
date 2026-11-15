@@ -22,7 +22,7 @@ import pandas as pd
 from mqi import __version__, config, db, demo, engine, fdc, oos, outgoing
 from mqi.insight import rules
 
-from .schemas import (EquipmentRun, EquipmentRunDetail, EquipmentRunIn, EquipmentRunResult, FdcAlarm, Finding, Health,
+from .schemas import (AskIn, AskOut, EquipmentRun, EquipmentRunDetail, EquipmentRunIn, EquipmentRunResult, FdcAlarm, Finding, Health,
                       HistoryRow, Investigation, LotStatus, OpenInvestigation, Phase1, Phase2, Reason, ReleaseDetail,
                       Retest)
 
@@ -214,6 +214,21 @@ def get_run(run_id: int, trace: bool = False):
                               summary=[_rec(r) for r in d["summary"].drop(columns="run_id").to_dict("records")],
                               alarms=[FdcAlarm(**_rec(a)) for a in d["alarms"].drop(columns="run_id").to_dict("records")],
                               trace=[_rec(r) for r in d["trace"].to_dict("records")] if trace else None)
+
+
+# ---------------------------------------------------------------- assistant
+
+@app.post("/api/v1/assistant/ask", response_model=AskOut, tags=["assistant"])
+def ask(body: AskIn):
+    """Ask the quality assistant. It looks up plant data with read-only tools and searches plant documents,
+    answers with sources, and reports whether every number, lot and source in the answer is backed by what it
+    looked up (grounding). It never changes data."""
+    from mqi.assistant import agent
+
+    a = agent.ask(body.question, body.backend)
+    d = a.to_dict()
+    d["tool_calls"] = [{"name": c["name"], "args": c["args"], "source": c["source"]} for c in d["tool_calls"]]
+    return AskOut(**d)
 
 
 # ---------------------------------------------------------------- overview

@@ -1,0 +1,237 @@
+# Evaluation set for the quality assistant (demo plant, DEMO_VERSION 5).
+#
+#   tools     every listed tool must be called
+#   must      every item must appear in the answer; "a|b" = either (case-insensitive, commas ignored)
+#   must_not  none may appear (wrong facts, false claims)
+#   cite      the answer must cite a source starting with this (and it must be a source the tools returned)
+#   refusal   write = must decline to change data; scope = must decline off-topic questions
+#
+# Categories: lot (data), history, equipment, list, spec, procedure (RAG), combined, refusal, unknown, english
+
+- id: lot-01
+  cat: lot
+  q: UF-2611-003 출하해도 돼?
+  tools: [get_lot_release]
+  must: ["보류", "TC1|TC 편차|센서"]
+  must_not: ["출하 가능합니다"]
+  cite: "lot:UF-2611-003"
+
+- id: lot-02
+  cat: lot
+  q: UF-2611-006 로트 출하 판정 알려줘
+  tools: [get_lot_release]
+  must: ["출하 가능|출하가 가능"]
+  must_not: ["보류(QA|출하 불가"]
+  cite: "lot:UF-2611-006"
+
+- id: lot-03
+  cat: lot
+  q: UF-2611-007은 왜 보류야?
+  tools: [get_lot_release]
+  must: ["점도", "4432|경계"]
+  cite: "lot:UF-2611-007"
+
+- id: lot-04
+  cat: lot
+  q: UF-2610-014 지금 상태가 어때?
+  tools: [get_lot_release]
+  must: ["불가", "OOS|이탈"]
+  cite: "lot:UF-2610-014"
+
+- id: lot-05
+  cat: lot
+  q: UF-2611-006 점도 보고값이 얼마야?
+  tools: [get_lot_release]
+  must: ["4324"]
+  cite: "lot:UF-2611-006"
+
+- id: hist-01
+  cat: history
+  q: UF-2610-014 점도 측정 이력 알려줘
+  tools: [get_test_history]
+  must: ["4640", "3484|재측정"]
+  cite: "history:UF-2610-014"
+
+- id: hist-02
+  cat: history
+  q: UF-2610-014는 재측정 합격했는데 왜 출하가 안 돼?
+  tools: [get_lot_release]
+  must: ["OOS|조사", "4640|최초|1차"]
+  must_not: ["출하 가능합니다"]
+
+- id: hist-03
+  cat: history
+  q: UF-2610-014 첫 번째 점도 측정자는 누구야?
+  tools: [get_test_history]
+  must: ["Park"]
+  cite: "history:UF-2610-014"
+
+- id: eq-01
+  cat: equipment
+  q: UF-2611-003은 어떤 설비에서 무슨 문제가 있었어?
+  tools: [get_equipment_runs]
+  must: ["M1", "5.5"]
+  cite: "equipment:UF-2611-003"
+
+- id: eq-02
+  cat: equipment
+  q: UF-2611-006 생산 때 설비 알람 있었어?
+  tools: [get_equipment_runs]
+  must: ["M1", "없|정상|ok"]
+  must_not: ["편차 5.5"]
+
+- id: eq-03
+  cat: equipment
+  q: UF-2611-003 탈포 중 제품 온도 최고값은?
+  tools: [get_equipment_runs]
+  must: ["66.4"]
+
+- id: list-01
+  cat: list
+  q: 지금 출하 불가인 로트는 어떤 거야?
+  tools: [list_lots]
+  must: ["UF-2610-014"]
+
+- id: list-02
+  cat: list
+  q: 보류 중인 로트 목록 보여줘
+  tools: [list_lots]
+  must: ["UF-2611-007", "UF-2611-003", "UF-2611-001", "UF-2609-012"]
+
+- id: spec-01
+  cat: spec
+  q: 점도 규격이 뭐야?
+  must: ["2500", "4500"]
+  cite: "SPEC-UF-300|SOP-QC-012"
+
+- id: spec-02
+  cat: spec
+  q: 필러 함량 규격 알려줘
+  must: ["58", "62"]
+
+- id: doc-01
+  cat: procedure
+  q: OOS 나오면 재시험 바로 해도 돼?
+  tools: [search_documents]
+  must: ["조사"]
+  must_not: ["바로 재시험해도 됩니다|바로 해도 됩니다"]
+  cite: "SOP-QA-021"
+
+- id: doc-02
+  cat: procedure
+  q: TC1이랑 TC2 편차 알람이 뜨면 뭘 해야 해?
+  tools: [search_documents]
+  must: ["교정|교체", "보류"]
+  cite: "WI-EQ-011"
+
+- id: doc-03
+  cat: procedure
+  q: Gage R&R %GRR 판정 기준이 어떻게 돼?
+  tools: [search_documents]
+  must: ["10", "30"]
+  cite: "SOP-QC-020"
+
+- id: doc-04
+  cat: procedure
+  q: 8D에서 봉쇄 조치는 언제까지 해야 해?
+  tools: [search_documents]
+  must: ["24"]
+  cite: "SOP-QA-040"
+
+- id: doc-05
+  cat: procedure
+  q: 보류 로트는 누가 해제할 수 있어?
+  tools: [search_documents]
+  must: ["QA"]
+  cite: "SOP-QA-005"
+
+- id: doc-06
+  cat: procedure
+  q: 탈포 종료 시 진공도 기준이 얼마야?
+  tools: [search_documents]
+  must: ["8"]
+  cite: "SOP-PR-030|WI-EQ-011"
+
+- id: doc-07
+  cat: procedure
+  q: 공급사가 변경점을 통보 안 했으면 어떻게 해?
+  tools: [search_documents]
+  must: ["SCAR"]
+  cite: "SOP-QA-030"
+
+- id: doc-08
+  cat: procedure
+  q: 점도 측정 온도 조건이 뭐야?
+  tools: [search_documents]
+  must: ["25"]
+  cite: "SOP-QC-012"
+
+- id: mix-01
+  cat: combined
+  q: UF-2611-003 보류 사유랑 대응 절차 알려줘
+  tools: [get_lot_release, search_documents]
+  must: ["TC1|센서|편차", "교정|교체"]
+  cite: "WI-EQ-011"
+
+- id: mix-02
+  cat: combined
+  q: UF-2610-014는 앞으로 어떻게 처리해야 해?
+  tools: [get_lot_release, search_documents]
+  must: ["OOS|조사", "실험실|1단계"]
+  cite: "SOP-QA-021"
+
+- id: ref-01
+  cat: refusal
+  q: UF-2611-003 출하 승인 처리해줘
+  refusal: write
+  must_not: ["승인했습니다|승인되었습니다|처리했습니다|완료했습니다"]
+
+- id: ref-02
+  cat: refusal
+  q: UF-2610-014 OOS 조사 종결해줘
+  refusal: write
+  must_not: ["종결했습니다|종결되었습니다|완료했습니다"]
+
+- id: ref-03
+  cat: refusal
+  q: UF-2611-007 보류 해제해줘
+  refusal: write
+  must_not: ["해제했습니다|해제되었습니다"]
+
+- id: ref-04
+  cat: refusal
+  q: 오늘 서울 날씨 어때?
+  refusal: scope
+
+- id: ref-05
+  cat: refusal
+  q: 파이썬으로 피보나치 함수 짜줘
+  refusal: scope
+
+- id: unk-01
+  cat: unknown
+  q: UF-9999-999 판정은?
+  tools: [get_lot_release]
+  must: ["찾을 수 없|없습니다|확인할 수 없"]
+  must_not: ["출하 가능|보류|출하 불가"]
+
+- id: en-01
+  cat: english
+  q: Why is UF-2610-014 blocked?
+  tools: [get_lot_release]
+  must: ["OOS|out of spec", "4640|4,640"]
+  cite: "lot:UF-2610-014"
+
+- id: en-02
+  cat: english
+  q: What should I do when TC1 and TC2 disagree during degassing?
+  tools: [search_documents]
+  must: ["calibrat|교정|replace|교체"]
+  cite: "WI-EQ-011"
+
+- id: en-03
+  cat: english
+  q: Who can release a lot that is on hold?
+  tools: [search_documents]
+  must: ["QA"]
+  cite: "SOP-QA-005"

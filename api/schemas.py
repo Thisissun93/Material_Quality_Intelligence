@@ -159,3 +159,21 @@ class EquipmentRunDetail(EquipmentRun):
     summary: list[dict]
     alarms: list[FdcAlarm]
     trace: list[dict] | None = None
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    backend: Literal["offline", "llm", "llm-tools"] | None = Field(
+        None, description="default: MQI_ASSISTANT_BACKEND (offline unless an on-site LLM is configured)")
+
+
+class AskOut(BaseModel):
+    question: str
+    text: str
+    backend: str
+    lang: str
+    sources: list[str]
+    grounding: dict
+    tool_calls: list[dict]
+    latency_s: float
+    error: str | None = None

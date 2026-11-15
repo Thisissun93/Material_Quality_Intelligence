@@ -26,6 +26,7 @@
 | 보고서는 사람이 작성 | 데이터로 채운 **표준 8D(D0–D8)·SCAR** 자동 작성: 5W2H·IS/IS NOT, 발생/유출 원인 분리, 6M 검증, 원료 한계 재계산 (한/영, A4·Excel) |
 | 결과만 보여 줌 | 재고 원료 조합별 **다음 배치 이탈 확률**을 예측해 사용할 조합을 추천 |
 | 조치는 엑셀로 따로 관리 | 8D·SCAR 조치를 **담당·기한·상태**로 추적하고, 상태가 8D D5·D6에 자동 반영 |
+| AI 챗봇은 그럴듯하게 지어냄 | **사내 LLM**이 시스템 데이터와 SOP만으로 답하고, 출처와 근거 검사를 함께 표시. 34문항 평가 결과 공개 |
 | 설비 데이터는 따로 보고, 검사 합격이면 출하 | 믹서 데이터를 **OPC UA로 자동 수집**해 Step별 FDC 판정. 검사는 합격이어도 설비 이상 이력이 있으면 출하 보류 |
 | 재시험 합격이면 그대로 출하 | 최초 결과를 지우지 않고 보존, **OOS 조사**(1단계 실험실 → 2단계 제조)가 끝나기 전에는 출하·성적서 발행 차단 |
 | 출하 성적서는 수기 작성 | 출하 판정(가능/보류/불가)을 통과한 로트만 **출하 CoA PDF** 발행 |
@@ -42,6 +43,7 @@
 | 6 | 조치·클레임 / 출하 판정·성적서 | 등록된 조치의 상태 관리, 보류 로트와 출하 CoA 발행 |
 | 7 | 출하 판정·성적서 → **UF-2610-014** | 첫 점도 4,640(이탈) → 재측정은 합격인데도 출하 불가. `검사 이력 · OOS 조사 · 재시험`에서 조사 등록 → 1단계 종결까지 직접 진행 |
 | 8 | 출하 판정·성적서 → **UF-2611-003** | 검사는 모두 합격인데 보류. `설비 이력 (FDC)`에서 TC1만 60℃를 유지하는 동안 TC2·제품 온도가 65℃를 넘은 트렌드 확인 |
+| 9 | AI 어시스턴트 | 예시 질문 "UF-2611-003 출하해도 돼?", "OOS 나오면 재시험 바로 해도 돼?", "출하 승인 처리해줘" — 출처와 근거 검사, 거절 확인 |
 
 ## 핵심 기능
 
@@ -134,6 +136,40 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 
 ![fdc](docs/img/fdc.png)
 
+#### AI 어시스턴트 (사내 LLM · RAG · Tool Calling)
+"이 로트 출하해도 돼?", "OOS 나오면 재시험 바로 해도 돼?" 같은 질문에, 시스템 데이터는 **읽기 전용 도구**로 조회하고 절차·기준은 **사내 문서(`kb/`)**에서 찾아 답합니다. 문장마다 출처가 붙고, 답의 숫자·로트·출처가 실제로 조회한 내용과 맞는지 **근거 검사** 결과를 함께 보여 줍니다.
+
+```mermaid
+flowchart LR
+  Q[질문] --> G{가드<br/>승인·해제 요청?<br/>업무 밖 질문?}
+  G -- 예 --> R[거절 + 담당 절차 안내]
+  G -- 아니오 --> P[사전 조회<br/>로트 판정·검사 이력·설비 런<br/>관련 SOP 검색]
+  P --> L[사내 LLM<br/>답 작성, 필요하면 도구 추가 호출]
+  L --> A[출처 자동 연결<br/>가짜 출처 삭제]
+  A --> V[근거 검사<br/>숫자·로트·출처 대조]
+  V --> U[답 + 출처 + 검사 결과]
+```
+
+- **사내 LLM.** OpenAI 호환 API(Ollama, vLLM, 사내 게이트웨이)로 붙습니다. 공장 데이터가 외부로 나가지 않습니다. LLM 서버가 없는 공개 데모에서는 같은 도구와 문서를 쓰는 규칙 기반(오프라인) 방식으로 동작합니다.
+- **AI는 아무것도 바꿀 수 없습니다.** 도구 8개는 모두 조회용이고, 승인·해제·종결 요청은 모델에 묻기 전에 규칙으로 거절하면서 누가 어디서 하는지(SOP)를 안내합니다.
+- **평가로 설계를 정했습니다.** 34문항(로트, 검사 이력, 설비, 절차, 복합, 거절, 없는 로트, 영어)으로 장치를 하나씩 더하며 측정했습니다. `qwen2.5:3b`, CPU 기준입니다.
+
+| 방식 | 통과 | 출처 표기 | 근거 검사 | 거절 판단 |
+|---|---|---|---|---|
+| LLM 단독 (Tool Calling만) | 21% | 27% | 41% | 0% |
+| + 가드 · 사전 조회 | 56% | 64% | 59% | 100% |
+| **+ 출처 자동 연결 (기본)** | **76%** | **96%** | **100%** | **100%** |
+| 참고: 규칙 기반 (LLM 없음) | 82% | 86% | 100% | 100% |
+
+소형 모델은 단독으로 두면 승인 요청을 거절하지 못하고, 문서를 찾지 않은 채 절차와 반대되는 답을 지어냈습니다. 그래서 안전 판단과 조회는 시스템이 하고, 모델은 문장만 쓰게 했습니다. 임베딩 하이브리드 검색, 남은 실패 유형, 배운 점은 [평가 보고서](docs/assistant_eval.md)에 있습니다.
+
+```bash
+python -m mqi.assistant.eval --backend offline                        # LLM 없이
+MQI_ASSISTANT_MODEL=qwen2.5:3b python -m mqi.assistant.eval --backend llm   # Ollama 실행 중일 때
+```
+
+![assistant](docs/img/assistant.png)
+
 ## 데모 데이터에 심어 둔 문제와 앱이 찾은 결과
 
 | 심어 둔 문제 | 앱의 판단 |
@@ -149,14 +185,14 @@ python -m mqi.ingest.watcher "D:/LabShare/Exports"
 | 최근 로트 1건: 첫 점도 4,640 mPa·s(USL 4,500, 측정자 Park) → 같은 시료 재측정 합격, OOS 조사 없음 | 재측정값으로 분석하되 최초 결과를 보존하고 "출하 불가: OOS 조사 필요" |
 | 최근 20개 로트의 믹서 런 중 UF-2611-003: 탈포 중 TC1이 5℃ 낮게 읽힘 (TC1은 60℃ 유지, 실제 65℃) | 20개 런 중 이 런만 알람(오알람 0), 원인 "TC1·TC2 편차 5.5℃", 출하 판정 보류 |
 
-위 결과는 `tests/`의 테스트 62개가 커밋마다 GitHub Actions에서 SQLite와 PostgreSQL 두 DB로 확인합니다.
+위 결과는 `tests/`의 테스트 85개가 커밋마다 GitHub Actions에서 SQLite와 PostgreSQL 두 DB로 확인합니다.
 
 ## 실행
 
 ```bash
 pip install -r requirements.txt
 streamlit run app/main.py       # 첫 실행 시 데모 데이터를 자동 생성 (SQLite 파일)
-pytest -q                       # 테스트 62개 (API 테스트는 requirements-api.txt 설치 시)
+pytest -q                       # 테스트 85개 (API 테스트는 requirements-api.txt 설치 시)
 ```
 
 | 하고 싶은 일 | 방법 |
@@ -211,6 +247,7 @@ flowchart LR
 | `app` | 같은 DB를 보는 Streamlit 앱. API로 등록한 OOS 조사가 화면에 바로 반영됨 |
 | `equipment` | 믹서 M1·M2 시뮬레이터 (OPC UA 서버, `opc.tcp://localhost:4840/mqi/`). 시간 60배속이라 90분 배치가 90초. UaExpert 같은 OPC UA 클라이언트로 직접 태그를 볼 수 있음 |
 | `collector` | 믹서를 읽어 배치 단위로 잘라 API로 전송. API가 멈춰 있으면 디스크에 쌓아 두었다가 순서대로 다시 보냄 |
+| `llm`, `llm-init` | 사내 LLM (Ollama, 선택). `MQI_ASSISTANT_BACKEND=llm docker compose --profile llm up`으로 켜면 첫 실행 때 모델(약 2GB)을 받음 |
 
 **주요 API**
 
@@ -224,10 +261,11 @@ flowchart LR
 | POST | `/api/v1/oos/{no}/phase1` · `/phase2` | 실험실 조사 · 제조 조사 종결 |
 | POST | `/api/v1/equipment/runs` | 설비 런 수신 (원시 트레이스) → 서버가 FDC 판정 |
 | GET | `/api/v1/equipment/runs/{id}?trace=true` | Step별 요약, 알람, 트레이스 |
+| POST | `/api/v1/assistant/ask` | AI 어시스턴트 질문 → 답, 출처, 근거 검사 결과, 조회 내역 |
 | GET | `/api/v1/findings` | 개요 화면의 우선 조치 목록 |
 
 **설계에서 정한 것**
-- **SQLite와 PostgreSQL을 모두 지원.** `MQI_DATABASE_URL`이 있으면 PostgreSQL, 없으면 SQLite 파일입니다. SQL 변환은 `mqi/db.py` 한 곳에서만 하고 분석 코드는 그대로 둡니다. 덕분에 Streamlit Cloud 데모는 계속 SQLite로 돌고, 테스트 62개는 CI에서 두 DB로 각각 실행됩니다.
+- **SQLite와 PostgreSQL을 모두 지원.** `MQI_DATABASE_URL`이 있으면 PostgreSQL, 없으면 SQLite 파일입니다. SQL 변환은 `mqi/db.py` 한 곳에서만 하고 분석 코드는 그대로 둡니다. 덕분에 Streamlit Cloud 데모는 계속 SQLite로 돌고, 테스트 85개는 CI에서 두 DB로 각각 실행됩니다.
 - **업무 규칙 위반은 409, 입력 형식 오류는 422.** 예를 들어 OOS 조사 없이 재시험을 넣으면 409와 이유를 돌려줍니다. 호출하는 시스템이 무엇을 고쳐야 하는지 알 수 있게 하기 위해서입니다.
 - **분석은 데이터가 바뀔 때만 다시 계산.** 쓰기가 일어날 때마다 DB의 `rev` 값이 올라가고, 앱과 API는 이 값이 바뀌었을 때만 분석을 다시 돌립니다. 첫 요청 약 2초, 이후 0.2초 안팎입니다.
 - **FDC 판정은 서버 한 곳에서.** 수집기는 통신·배치 분할·전송만 하고, Step 요약과 판정은 서버가 `config/fdc.yaml`로 합니다. 설비가 늘어도 기준이 한 곳에 있어 판정이 일관되고, 기준을 바꿔도 수집기를 다시 배포할 필요가 없습니다.
@@ -237,7 +275,7 @@ flowchart LR
 
 **다음 단계 (계획)**
 1. 로그인과 역할(QC·QA·승인자), 출하 승인 기록과 근거 보존
-2. 사내에서 돌아가는 LLM(RAG·Tool Calling)과 답변 품질 평가
+2. AI 어시스턴트: 복합 질문(로트 상태 + 대응 절차) 개선, GPU에서 7B 이상 모델로 같은 평가 재측정
 3. SECS/GEM(반도체 장비 표준) 수집 추가
 
 ## 검증
@@ -274,10 +312,12 @@ mqi/
   oos.py         검사 이력 · OOS 조사 · 재시험
   fdc.py         설비 런 Step 요약 · FDC 판정 · 출하 연동
   equipment_model.py  믹서 배치 모델 (시뮬레이터와 데모가 공유)
+  assistant/     AI 어시스턴트: 문서 검색 · 읽기 전용 도구 · 가드 · 출처 연결 · 근거 검사 · 평가
   db.py          저장소 (SQLite 또는 PostgreSQL)
 api/             REST API (FastAPI)
 equipment/       OPC UA 믹서 시뮬레이터
 collector/       OPC UA 수집기 (배치 분할 · store-and-forward)
+kb/              사내 문서 (데모용 가상 SOP · 작업지시)
 app/             Streamlit (한국어/English)
 config/          specs · rules · fdc · vocabulary · instruments/*.yaml
 tests/           SQLite · PostgreSQL 양쪽에서 실행
@@ -292,4 +332,4 @@ Taeyang Kim · [github.com/Thisissun93](https://github.com/Thisissun93)
 ---
 
 ### English summary
-An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. Repeat tests never overwrite the first result: a lot whose first result was out of specification stays blocked until an OOS investigation either proves a laboratory error (phase 1) or confirms the failure and sets a disposition (phase 2). Mixer data is collected over OPC UA by a separate collector (batch cutting, store-and-forward) and judged per recipe step on the server, including dual-sensor agreement that catches a drifting control thermocouple; an alarmed run puts its lot on QA hold. The same analysis also runs as a service: PostgreSQL, a FastAPI REST API, the Streamlit app, an OPC UA equipment simulator and the collector in Docker Compose, with the full test suite running on both SQLite and PostgreSQL in CI. All data is synthetic; the test suite checks that every planted problem is found.
+An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. Repeat tests never overwrite the first result: a lot whose first result was out of specification stays blocked until an OOS investigation either proves a laboratory error (phase 1) or confirms the failure and sets a disposition (phase 2). Mixer data is collected over OPC UA by a separate collector (batch cutting, store-and-forward) and judged per recipe step on the server, including dual-sensor agreement that catches a drifting control thermocouple; an alarmed run puts its lot on QA hold. A quality assistant answers from plant data (read-only tools) and plant procedures (RAG) through an on-site LLM; guard rails, pre-fetched evidence, system-side citation and a grounding check took a 3B model from 21 % to 76 % on a 34-question evaluation, with 100 % grounded answers and refusals. The same analysis also runs as a service: PostgreSQL, a FastAPI REST API, the Streamlit app, an OPC UA equipment simulator and the collector in Docker Compose, with the full test suite running on both SQLite and PostgreSQL in CI. All data is synthetic; the test suite checks that every planted problem is found.
