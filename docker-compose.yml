@@ -11,6 +11,9 @@ x-mqi: &mqi
     MQI_ASSISTANT_BACKEND: ${MQI_ASSISTANT_BACKEND:-offline}
     MQI_ASSISTANT_BASE_URL: http://llm:11434/v1
     MQI_ASSISTANT_MODEL: ${MQI_ASSISTANT_MODEL:-qwen2.5:3b}
+    MQI_DEMO_PASSWORD: ${MQI_DEMO_PASSWORD:-demo1234}        # demo accounts only; plant users: python -m mqi.auth
+    MQI_COLLECTOR_USER: collector
+    MQI_COLLECTOR_PASSWORD: ${MQI_COLLECTOR_PASSWORD:-demo1234}
   restart: unless-stopped
 
 services:
@@ -70,6 +73,7 @@ services:
       SIM_ACCEL: "60"
       SIM_LOTS: auto              # the newest lots in MQI, then simulator-only lot numbers
       MQI_API_URL: http://api:8000
+      MQI_COLLECTOR_PASSWORD: ${MQI_COLLECTOR_PASSWORD:-demo1234}
     ports: ["4840:4840"]          # connect UaExpert or any OPC UA client to opc.tcp://localhost:4840/mqi/
     depends_on:
       api:
@@ -83,6 +87,8 @@ services:
       OPCUA_ENDPOINT: opc.tcp://equipment:4840/mqi/
       EQUIPMENT: M1,M2
       MQI_API_URL: http://api:8000
+      MQI_COLLECTOR_USER: collector
+      MQI_COLLECTOR_PASSWORD: ${MQI_COLLECTOR_PASSWORD:-demo1234}
       POLL_S: "0.5"
       SPOOL_DIR: /app/spool
     volumes:

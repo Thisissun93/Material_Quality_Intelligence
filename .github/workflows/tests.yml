@@ -51,16 +51,20 @@ jobs:
           curl -fs localhost:8000/health | grep '"backend":"postgresql"'
       - name: smoke test
         run: |
-          curl -fs "localhost:8000/api/v1/lots?status=block" | grep -q OOS
+          T=$(curl -fs -X POST localhost:8000/api/v1/auth/token -H 'Content-Type: application/json' \
+              -d '{"username":"viewer","password":"demo1234"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+          echo "T=$T" >> "$GITHUB_ENV"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/v1/lots)" = 401 ]
+          curl -fs -H "Authorization: Bearer $T" "localhost:8000/api/v1/lots?status=block" | grep -q OOS
           curl -fs -o /dev/null localhost:8501
       - name: equipment data arrives over OPC UA
         run: |
           for i in $(seq 1 80); do
-            n=$(curl -fs "localhost:8000/api/v1/equipment/runs?source=opcua" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+            n=$(curl -fs -H "Authorization: Bearer $T" "localhost:8000/api/v1/equipment/runs?source=opcua" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
             [ "$n" -ge 2 ] && break
             sleep 5
           done
-          curl -fs "localhost:8000/api/v1/equipment/runs?source=opcua"
+          curl -fs -H "Authorization: Bearer $T" "localhost:8000/api/v1/equipment/runs?source=opcua"
           [ "$n" -ge 2 ]
       - if: failure()
         run: docker compose logs

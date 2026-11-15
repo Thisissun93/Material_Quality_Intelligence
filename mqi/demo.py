@@ -14,6 +14,8 @@ Built-in stories the analytics should find on their own:
 """
 from __future__ import annotations
 
+import os
+
 import shutil
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -399,7 +401,7 @@ def _coa_report(out: Path, r, product: str, grade: str, qty: int, items) -> None
 
 
 # Bump when the planted scenarios change, so a deployed app rebuilds an older demo database.
-DEMO_VERSION = "5"
+DEMO_VERSION = "6"
 OOS_DEMO_LOT = "UF-2610-014"   # the lot whose first result was re-measured without an investigation
 FDC_DEMO_LOT = "UF-2611-003"   # degassed on M1 while its control thermocouple read 5 degC low
 _SIGNATURE = "UF-2609-012"          # a lot that only the demo plant has
@@ -432,8 +434,31 @@ def build(folder: Path | None = None, dbpath: Path | None = None, ingest: bool =
     complaint_no = seed_complaint(dbpath)
     seed_oos_retest(dbpath, complaint_no)
     seed_equipment(dbpath)
+    from . import auth
+    auth.seed_demo_users(dbpath)
+    seed_approvals(dbpath)
     db.set_meta("demo_version", DEMO_VERSION, dbpath)
     return res
+
+
+APPROVED_DEMO_LOT_IDX, REVIEWED_DEMO_LOT_IDX = 2, 1     # among the newest releasable lots
+
+
+def seed_approvals(dbpath=None) -> None:
+    """One lot QA-reviewed and approved, one reviewed and waiting for the approver."""
+    from . import approval, auth, engine, outgoing
+
+    b = engine.run(dbpath)
+    ok = outgoing.batch_status(b, 12)
+    ok = ok[ok["status"] == "release"]["lot_id"].tolist()
+    if len(ok) <= APPROVED_DEMO_LOT_IDX:
+        return
+    pw = os.environ.get("MQI_DEMO_PASSWORD", auth.DEMO_PASSWORD)
+    qa, ap = auth.get_user("qa.lee", dbpath), auth.get_user("approver.park", dbpath)
+    lot = ok[APPROVED_DEMO_LOT_IDX]
+    approval.review(b, lot, qa, pw, "규격·이력·설비 이상 없음")
+    approval.approve(b, lot, ap, pw)
+    approval.review(b, ok[REVIEWED_DEMO_LOT_IDX], qa, pw, "이상 없음")
 
 
 def seed_equipment(dbpath=None, n: int = 20) -> int:

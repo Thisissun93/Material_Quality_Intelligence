@@ -35,16 +35,16 @@ def test_oos_flow_over_http(client):
                           "reason": "check", "operator": "Kim"})
     assert r.status_code == 409
 
-    inv = client.post("/api/v1/oos", json={"lot_id": lot, "property": "viscosity", "opened_by": "QC Lee"})
+    inv = client.post("/api/v1/oos", json={"lot_id": lot, "property": "viscosity"})
     assert inv.status_code == 201
     no = inv.json()["no"]
     assert client.get(f"/api/v1/lots/{lot}/release").json()["status"] == "block"
 
-    bad = client.post(f"/api/v1/oos/{no}/phase1", json={"lab_error": True, "cause": "x", "by": "Lee"})
+    bad = client.post(f"/api/v1/oos/{no}/phase1", json={"lab_error": True, "cause": "x"})
     assert bad.status_code == 409                       # a lab error needs its category
 
     ok = client.post(f"/api/v1/oos/{no}/phase1",
-                     json={"lab_error": True, "category": "instrument", "by": "Lee",
+                     json={"lab_error": True, "category": "instrument",
                            "cause": "Torque zero check failed; passed after re-zero"})
     assert ok.json()["outcome"] == "invalidated"
     d = client.get(f"/api/v1/lots/{lot}/release").json()
@@ -54,7 +54,7 @@ def test_oos_flow_over_http(client):
 
 
 def test_validation_errors_are_422(client):
-    r = client.post("/api/v1/oos/OOS-X/phase2", json={"finding": "x", "disposition": "melt", "by": "a"})
+    r = client.post("/api/v1/oos/OOS-X/phase2", json={"finding": "x", "disposition": "melt"})
     assert r.status_code == 422
 
 

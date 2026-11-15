@@ -56,27 +56,24 @@ class Retest(BaseModel):
     value: float
     attempt: Literal["remeasure", "resample"]
     reason: str = Field(min_length=1)
-    operator: str = Field(min_length=1)
+    operator: str | None = Field(None, description="Analyst who ran the test (default: the signed-in user)")
     instrument: str | None = None
 
 
 class OpenInvestigation(BaseModel):
     lot_id: str
     property: str
-    opened_by: str = Field(min_length=1)
 
 
 class Phase1(BaseModel):
     lab_error: bool
     cause: str = Field(min_length=1, description="Evidence of the laboratory check")
-    by: str = Field(min_length=1)
     category: Literal["instrument", "analyst", "sample_prep", "calculation", "standard"] | None = None
 
 
 class Phase2(BaseModel):
     finding: str = Field(min_length=1)
     disposition: Literal["scrap", "rework", "concession"]
-    by: str = Field(min_length=1)
 
 
 class Investigation(BaseModel):
@@ -177,3 +174,72 @@ class AskOut(BaseModel):
     tool_calls: list[dict]
     latency_s: float
     error: str | None = None
+
+
+# ---------------------------------------------------------------- users / release approval / audit
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires: str
+    username: str
+    name: str
+    role: str
+
+
+class Me(BaseModel):
+    username: str
+    name: str
+    role: str
+    permissions: list[str]
+
+
+class SignIn(BaseModel):
+    password: str = Field(description="The signer's password again (electronic signature)")
+    comment: str = Field("", description="Required for a hold lot and for a rejection")
+
+
+class Decision(BaseModel):
+    id: int
+    action: Literal["review", "approve", "reject"]
+    level: str
+    comment: str | None
+    evidence_hash: str
+    actor: str
+    actor_name: str | None
+    role: str | None
+    at: str
+    meaning: str | None
+
+
+class Approval(BaseModel):
+    lot_id: str
+    stage: Literal["none", "reviewed", "approved", "rejected"]
+    stale: bool = Field(description="The lot's evidence changed after the last signature")
+    coa_ready: bool = Field(description="Approved and the approval still covers the current evidence")
+    level: str
+    current_hash: str
+    history: list[Decision]
+
+
+class AuditEntry(BaseModel):
+    id: int
+    at: str
+    actor: str
+    role: str | None
+    action: str
+    target: str | None
+    detail: dict
+    hash: str
+
+
+class AuditCheck(BaseModel):
+    ok: bool
+    rows: int
+    broken_at: int | None
+    reason: str

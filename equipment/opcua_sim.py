@@ -93,7 +93,10 @@ def _auto_lots(api: str, n: int = 6) -> list[str]:
     try:
         import httpx
 
-        r = httpx.get(f"{api}/api/v1/lots", params={"limit": n}, timeout=10)
+        t = httpx.post(f"{api}/api/v1/auth/token", timeout=10,
+                       json={"username": os.environ.get("MQI_COLLECTOR_USER", "collector"),
+                             "password": os.environ.get("MQI_COLLECTOR_PASSWORD", "demo1234")}).json()["access_token"]
+        r = httpx.get(f"{api}/api/v1/lots", params={"limit": n}, timeout=10, headers={"Authorization": f"Bearer {t}"})
         r.raise_for_status()
         return [x["lot_id"] for x in r.json()]
     except Exception as e:  # noqa: BLE001 - simulator keeps running with its own lot numbers

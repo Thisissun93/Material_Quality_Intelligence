@@ -146,3 +146,58 @@ def localize(df):
 
 def lot_axis(b):
     return b.product["lot_id"]
+
+
+# ---------------------------------------------------------------- users
+
+def user() -> dict | None:
+    return st.session_state.get("user")
+
+
+def can(perm: str) -> bool:
+    from mqi import auth
+    return auth.can(user(), perm)
+
+
+def is_demo() -> bool:
+    try:
+        return db.get_meta("demo_version") is not None
+    except Exception:
+        return True
+
+
+def sign_in_form(key: str = "side"):
+    """Sign-in. On the demo plant the demo accounts are listed with their password."""
+    from mqi import auth
+    ko = lang() == "ko"
+    demo = is_demo()
+    with st.form(f"login_{key}", border=False):
+        if demo:
+            opts = [u for u, _, r in auth.DEMO_USERS if r != "service"]
+            names = {u: f"{n} ({u}) · {auth.ROLE_KO[r] if ko else r}" for u, n, r in auth.DEMO_USERS}
+            uid = st.selectbox("계정" if ko else "Account", opts, format_func=names.get, index=1)
+        else:
+            uid = st.text_input("사용자 ID" if ko else "User ID")
+        pw = st.text_input("비밀번호" if ko else "Password", type="password")
+        if demo:
+            st.caption(("데모 계정 비밀번호: " if ko else "Demo password: ") + f"`{auth.DEMO_PASSWORD}`")
+        if st.form_submit_button("로그인" if ko else "Sign in", type="primary", width="stretch"):
+            u = auth.check_password(uid, pw)
+            if u:
+                st.session_state["user"] = u
+                st.rerun()
+            st.error("ID 또는 비밀번호가 맞지 않습니다" if ko else "Wrong user ID or password")
+
+
+def user_box():
+    from mqi import auth
+    ko = lang() == "ko"
+    u = user()
+    if u:
+        st.markdown(f"**{u['name']}** · {auth.ROLE_KO[u['role']] if ko else u['role']}")
+        if st.button("로그아웃" if ko else "Sign out", width="stretch"):
+            st.session_state.pop("user", None)
+            st.rerun()
+    else:
+        with st.expander("로그인 (입력·서명)" if ko else "Sign in (entry, signatures)"):
+            sign_in_form()

@@ -130,6 +130,10 @@ def test_store_and_forward_keeps_order(tmp_path):
 def test_api_receives_and_judges_a_run(client):
     tr = batch_trace("UF-2611-006", "M2", Recipe(), Fault())
     body = {"lot_id": "UF-2611-006", "equipment": "M2", "source": "opcua", "samples": tr.to_dict("records")}
+    from conftest import login
+
+    assert client.post("/api/v1/equipment/runs", json=body).status_code == 403     # QA is not the collector
+    client.headers.update(login(client, "collector"))
     r = client.post("/api/v1/equipment/runs", json=body)
     assert r.status_code == 201 and r.json()["status"] == "alarm"
     rid = r.json()["id"]

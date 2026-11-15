@@ -7,7 +7,7 @@ import streamlit as st
 import ui
 import plotly.graph_objects as go
 
-from mqi import config, fdc, oos, outgoing
+from mqi import approval, auth, config, fdc, oos, outgoing
 from mqi.ingest import coa_docs
 
 TONE = {"release": "🟢", "hold": "🟡", "block": "🔴"}
@@ -28,11 +28,13 @@ def render():
         ui.kpi(col, f"{TONE[k]} {word[k]}", int((stat['status'] == k).sum()),
                tone={"hold": "warn", "block": "bad"}.get(k, ""))
 
+    apr = approval.table(b, 40)
     left, right = st.columns([1, 1.3], gap="large")
     with left:
         show = stat.assign(s=stat["status"].map(lambda v: f"{TONE[v]} {word[v]}"),
-                           why=stat["reasons"].map(lambda r: " · ".join(x[0 if ko else 1] for x in r)))[["lot_id", "s", "why"]]
-        show.columns = ["Lot", "판정" if ko else "Status", "사유" if ko else "Reason"]
+                           a=stat["lot_id"].map(lambda x: _badge(apr.get(x), ko)),
+                           why=stat["reasons"].map(lambda r: " · ".join(x[0 if ko else 1] for x in r)))[["lot_id", "s", "a", "why"]]
+        show.columns = ["Lot", "판정" if ko else "Status", "승인" if ko else "Sign-off", "사유" if ko else "Reason"]
         ev = st.dataframe(show, hide_index=True, width="stretch", height=520, on_select="rerun",
                           selection_mode="single-row", key="ship_pick")
         rows = ev.selection.rows if ev and ev.selection else []
@@ -50,6 +52,7 @@ def render():
                      column_config={tbl.columns[1]: st.column_config.NumberColumn(format="%.4g")})
         _history(lot, ko, any(oos_kw in w[1] for w in why for oos_kw in ("OOS", "repeat")))
         _equipment(lot, ko, any("Equipment alarm" in w[1] for w in why))
+        stt = _approval(b, lot, lvl, ko)
         c1, c2, c3 = st.columns([2, 1, 1])
         cust = c1.text_input("고객사" if ko else "Customer", value="Customer A (demo)")
         qty = c2.number_input("수량 kg" if ko else "Qty kg", min_value=0.0, value=200.0, step=20.0)
@@ -58,9 +61,11 @@ def render():
             st.error("규격 이탈 또는 미측정 항목이 있어 성적서를 발행할 수 없습니다." if ko else
                      "Out of spec or missing results: no certificate can be issued.")
             return
-        ok = lvl == "release" or st.checkbox(
-            "QA 검토 완료, 정식 발행 승인" if ko else "Reviewed by QA, approve formal issue", key=f"ok_{lot}")
-        data = outgoing.pdf(b, lot, cust, qty, po, draft=not ok)
+        ok = stt["coa_ready"]
+        if not ok:
+            st.caption("정식 성적서는 QA 검토와 출하 승인 서명이 끝난 뒤 발행됩니다. 지금은 초안만 받을 수 있습니다." if ko else
+                       "The formal CoA is issued after the QA review and release approval signatures. Draft only for now.")
+        data = outgoing.pdf(b, lot, cust, qty, po, draft=not ok, signoff=approval.signoff(stt))
         st.download_button(("성적서 PDF 발행" if ok else "초안 PDF (HOLD 워터마크)") if ko else
                            ("Issue CoA PDF" if ok else "Draft PDF (HOLD watermark)"),
                            data, file_name=f"CoA_{lot}{'' if ok else '_DRAFT'}.pdf", mime="application/pdf",
@@ -69,6 +74,89 @@ def render():
         tmp.write_bytes(data)
         coa_docs.pages.cache_clear()
         st.image(coa_docs.pages(str(tmp), 1.3)[0], width="stretch")
+
+
+def _badge(s: dict | None, ko: bool) -> str:
+    if not s or s["stage"] == "none":
+        return ""
+    if s["stale"]:
+        return "⚠️ 근거 변경" if ko else "⚠️ Evidence changed"
+    return {"reviewed": "🖊️ 승인 대기" if ko else "🖊️ Awaiting approval", "approved": "✅ 승인" if ko else "✅ Approved",
+            "rejected": "↩️ 반려" if ko else "↩️ Rejected"}[s["stage"]]
+
+
+def _approval(b, lot: str, lvl: str, ko: bool) -> dict:
+    """Two signatures (QA review, then approver) bound to the hash of the lot's evidence."""
+    L = (lambda k, e: k) if ko else (lambda k, e: e)
+    stt = approval.state(b, lot)
+    u = ui.user()
+    stage = (approval.STAGE_KO if ko else approval.STAGE_EN)[stt["stage"]]
+    head = f"{L('출하 승인', 'Release sign-off')} · {_badge(stt, ko) or stage}"
+    with st.expander(head, expanded=stt["stage"] != "none" or lvl != "block"):
+        if stt["stale"]:
+            st.warning(L("마지막 서명 이후 이 로트의 근거 데이터(검사 이력·OOS·설비·클레임)가 바뀌었습니다. 이전 서명은 "
+                         "현재 데이터를 보증하지 않으므로 QA 재검토가 필요합니다.",
+                         "The lot's evidence (tests, OOS, equipment, complaints) changed after the last signature. "
+                         "That signature does not cover the current data: QA must review again."))
+        for r in stt["history"]:
+            icon = {"review": "🖊️", "approve": "✅", "reject": "↩️"}[r["action"]]
+            what = {"review": L("QA 검토", "QA review"), "approve": L("출하 승인", "Approved"),
+                    "reject": L("반려", "Rejected")}[r["action"]]
+            st.markdown(f"{icon} **{what}** · {r['actor_name']} ({r['actor']}) · {str(r['at'])[:16].replace('T', ' ')}"
+                        f" · <span class='muted'>{L('근거', 'evidence')} #{r['evidence_hash'][:12]}</span>",
+                        unsafe_allow_html=True)
+            if r["comment"]:
+                st.caption(f"“{r['comment']}”")
+        if not stt["history"]:
+            st.caption(L("아직 서명이 없습니다. QA가 검토 서명을 하고, 다른 사람이 승인자 권한으로 승인해야 정식 성적서가 "
+                         "발행됩니다.", "No signatures yet. QA signs the review, then another person with the approver "
+                         "role approves; only then is the formal CoA issued."))
+        if lvl == "block":
+            return stt
+        action = None
+        if stt["stage"] in ("none", "rejected") or (stt["stage"] in ("reviewed", "approved") and stt["stale"]):
+            action = "review"
+        elif stt["stage"] == "reviewed":
+            action = "approve"
+        if action is None:
+            return stt
+        perm = "release.review" if action == "review" else "release.approve"
+        if not u:
+            st.info(L(f"{'QA' if action == 'review' else '출하 승인자'} 계정으로 로그인하면 서명할 수 있습니다 "
+                      "(사이드바).", f"Sign in as {'QA' if action == 'review' else 'an approver'} to sign (sidebar)."))
+            return stt
+        if not auth.can(u, perm):
+            st.caption(L(f"현재 계정({auth.ROLE_KO[u['role']]})으로는 "
+                         f"{'검토' if action == 'review' else '승인'} 서명을 할 수 없습니다.",
+                         f"Your role ({u['role']}) cannot sign the {action}."))
+            return stt
+        if action == "approve" and stt["review"]["actor"] == u["username"]:
+            st.caption(L("검토한 사람은 같은 로트를 승인할 수 없습니다. 다른 승인자가 서명해야 합니다.",
+                         "The reviewer cannot approve the same lot; another approver must sign."))
+            return stt
+        with st.form(f"sign_{lot}"):
+            meaning = approval.MEANING["review" if action == "review" else "approve"][0 if ko else 1]
+            st.markdown(f"**{meaning}**")
+            need = lvl == "hold"
+            comment = st.text_area(L("판단 근거 (보류 로트·반려 시 필수)", "Justification (required for a hold lot or a "
+                                     "rejection)"), height=70)
+            pw = st.text_input(L(f"{u['name']} 비밀번호 (전자서명)", f"{u['name']} password (e-signature)"),
+                               type="password")
+            c1, c2 = st.columns(2)
+            go_ = c1.form_submit_button(L("검토 서명" if action == "review" else "승인 서명",
+                                          "Sign review" if action == "review" else "Sign approval"), type="primary")
+            no = action == "approve" and c2.form_submit_button(L("반려", "Reject"))
+            if go_ or no:
+                try:
+                    fn = approval.reject if no else (approval.review if action == "review" else approval.approve)
+                    fn(b, lot, u, pw, comment)
+                    _done(L("서명 완료", "Signed"))
+                except (ValueError, approval.Denied) as e:
+                    st.error(str(e))
+            if need:
+                st.caption(L("보류 판정 로트입니다. 보류 사유를 확인한 근거를 남겨야 서명할 수 있습니다.",
+                             "This lot is on hold: record why it may still ship."))
+    return stt
 
 
 def _done(msg: str):
@@ -111,6 +199,14 @@ def _history(lot: str, ko: bool, expanded: bool):
                      "Results are never edited or deleted. A retest is added as a new row; a failing result is set "
                      "aside only when phase 1 proves a laboratory error."))
 
+        u = ui.user()
+        if not ui.can("test.write"):
+            st.info(L("OOS 조사·재시험 입력은 QC 또는 QA 계정으로 로그인해야 합니다 (사이드바). 입력한 사람은 로그인 "
+                      "계정으로 기록됩니다.", "Sign in as QC or QA to open investigations and enter retests (sidebar). "
+                      "Entries are recorded under the signed-in account."))
+            return
+        who = dict(actor=u["username"], role=u["role"])
+
         # 1) failing results that nobody is investigating yet
         for prop in h.loc[h["oos"], "property"].unique():
             u = oos.uninvestigated(lot, prop)
@@ -122,10 +218,10 @@ def _history(lot: str, ko: bool, expanded: bool):
                              "재시험할 수 있습니다.",
                              f"{ui.prop_label(prop)} test {r['seq']} = {r['value']:.4g} is OOS: open an investigation "
                              "before any retest."))
-                by = st.text_input(L("조사 담당 (QC)", "Investigator (QC)"), key=f"ob_{lot}_{prop}")
+                st.caption(L(f"조사 담당: {u['name']}", f"Investigator: {u['name']}"))
                 if st.form_submit_button(L("OOS 조사 등록", "Open OOS investigation"), type="primary"):
                     try:
-                        _done(oos.open_investigation(lot, prop, by))
+                        _done(oos.open_investigation(lot, prop, u["name"], **who))
                     except ValueError as e:
                         st.error(str(e))
 
@@ -146,10 +242,9 @@ def _history(lot: str, ko: bool, expanded: bool):
                     cat = st.selectbox(L("오류 유형 (입증된 경우)", "Category (if proven)"), oos.LAB_CAUSES,
                                        format_func=lambda c: oos.LAB_CAUSE_KO[c] if ko else c)
                     cause = st.text_area(L("조사 근거", "Evidence"), height=70)
-                    by = st.text_input(L("조사자", "Investigator"))
                     if st.form_submit_button(L("1단계 종결", "Close phase 1"), type="primary"):
                         try:
-                            oos.record_phase1(i["no"], err, cause, by, cat if err else None)
+                            oos.record_phase1(i["no"], err, cause, u["name"], cat if err else None, **who)
                             _done(i["no"])
                         except ValueError as e:
                             st.error(str(e))
@@ -161,10 +256,10 @@ def _history(lot: str, ko: bool, expanded: bool):
                     finding = st.text_area(L("제조 조사 결과", "Manufacturing finding"), height=70)
                     disp = st.selectbox(L("처리", "Disposition"), oos.DISPOSITIONS,
                                         format_func=lambda d: oos.DISPOSITION_KO[d] if ko else d)
-                    by = st.text_input(L("담당 (생산·QA)", "Owner (production / QA)"))
-                    if st.form_submit_button(L("OOS 확정", "Confirm OOS"), type="primary"):
+                    if st.form_submit_button(L("OOS 확정", "Confirm OOS"), type="primary",
+                                             disabled=not ui.can("oos.phase2")):
                         try:
-                            oos.record_phase2(i["no"], finding, disp, by)
+                            oos.record_phase2(i["no"], finding, disp, u["name"], **who)
                             _done(i["no"])
                         except ValueError as e:
                             st.error(str(e))
@@ -177,12 +272,12 @@ def _history(lot: str, ko: bool, expanded: bool):
             kind = b_.selectbox(L("구분", "Type"), oos.ATTEMPTS, format_func=lambda k: names[k])
             val = c.number_input(L("결과", "Result"), value=None, format="%.4g")
             reason = st.text_input(L("재시험 사유", "Reason"))
-            op = st.text_input(L("측정자", "Analyst"))
+            op = st.text_input(L("측정자", "Analyst"), value=u["name"])
             if st.form_submit_button(L("재시험 저장", "Save retest")):
                 try:
                     if val is None:
                         raise ValueError(L("결과를 입력하세요", "Enter a result"))
-                    oos.add_retest(lot, prop, val, kind, reason, op)
+                    oos.add_retest(lot, prop, val, kind, reason, op, **who)
                     _done(L("재시험 저장", "Retest saved"))
                 except ValueError as e:
                     st.error(str(e))
