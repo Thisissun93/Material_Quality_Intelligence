@@ -1,11 +1,16 @@
 # PostgreSQL + REST API + Streamlit app + equipment (OPC UA) + collector.   docker compose up --build
 #   API docs  http://localhost:8000/docs
 #   App       http://localhost:8501
+# With the on-site LLM for the AI assistant (downloads a ~2 GB model on first start):
+#   MQI_ASSISTANT_BACKEND=llm docker compose --profile llm up --build
 x-mqi: &mqi
   build: .
   image: mqi:latest
   environment:
     MQI_DATABASE_URL: postgresql://mqi:${POSTGRES_PASSWORD:-mqi}@db:5432/mqi
+    MQI_ASSISTANT_BACKEND: ${MQI_ASSISTANT_BACKEND:-offline}
+    MQI_ASSISTANT_BASE_URL: http://llm:11434/v1
+    MQI_ASSISTANT_MODEL: ${MQI_ASSISTANT_MODEL:-qwen2.5:3b}
   restart: unless-stopped
 
 services:
@@ -85,6 +90,24 @@ services:
     depends_on:
       - equipment
 
+  # on-site LLM (OpenAI-compatible API). Plant data never leaves the site. Add a GPU for bigger models.
+  llm:
+    image: ollama/ollama:latest
+    profiles: ["llm"]
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+  llm-init:
+    image: ollama/ollama:latest
+    profiles: ["llm"]
+    environment:
+      OLLAMA_HOST: llm:11434
+    entrypoint: ["sh", "-c", "sleep 3 && ollama pull ${MQI_ASSISTANT_MODEL:-qwen2.5:3b}"]
+    depends_on: [llm]
+    restart: "no"
+
 volumes:
   pgdata:
   spool:
+  ollama:

@@ -18,7 +18,8 @@ if getattr(sys, "_mqi_sig", None) != _SIG:
     sys._mqi_sig = _SIG
 
 import ui  # noqa: E402
-from views import actions, capability, intake, msa, overview, release, report, settings, shipping, spc, supplier
+from views import (actions, assistant, capability, intake, msa, overview, release, report, settings, shipping, spc,
+                   supplier)
 
 st.set_page_config(page_title="Material Quality Intelligence", page_icon="◆", layout="wide")
 st.markdown(ui.CSS, unsafe_allow_html=True)
@@ -51,6 +52,7 @@ pages = {
         P["report"],
         st.Page(actions.render, title=ui.t("nav_actions"), icon=":material/task_alt:", url_path="actions"),
         st.Page(shipping.render, title=ui.t("nav_ship"), icon=":material/verified:", url_path="shipping"),
+        st.Page(assistant.render, title=ui.t("nav_assistant"), icon=":material/forum:", url_path="assistant"),
         st.Page(settings.render, title=ui.t("nav_settings"), icon=":material/tune:", url_path="settings"),
     ],
 }

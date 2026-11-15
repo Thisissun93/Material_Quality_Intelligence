@@ -13,6 +13,7 @@ TEXT = {
     "nav_report": ("보고서", "Reports"),
     "nav_actions": ("조치·클레임", "Actions & complaints"),
     "nav_ship": ("출하 판정·성적서", "Release & CoA"),
+    "nav_assistant": ("AI 어시스턴트", "AI assistant"),
     "nav_settings": ("설정", "Settings"),
     "group_data": ("데이터", "Data"),
     "group_analysis": ("분석", "Analysis"),

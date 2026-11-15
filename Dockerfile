@@ -13,6 +13,7 @@ COPY equipment ./equipment
 COPY collector ./collector
 COPY app ./app
 COPY config ./config
+COPY kb ./kb
 COPY .streamlit ./.streamlit
 
 RUN useradd --create-home mqi && mkdir -p /app/data /app/spool && chown -R mqi /app/data /app/config /app/spool
