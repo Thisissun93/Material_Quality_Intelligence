@@ -86,6 +86,24 @@ CREATE TABLE IF NOT EXISTS fdc_alarms (
 CREATE TABLE IF NOT EXISTS equipment_trace (
     run_id INTEGER, t_s REAL, step TEXT, tag TEXT, value REAL
 );
+-- Users and API tokens (passwords and tokens are stored only as salted hashes).
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY, name TEXT, role TEXT, salt TEXT, pw_hash TEXT, active INTEGER, created TEXT
+);
+CREATE TABLE IF NOT EXISTS tokens (
+    token_hash TEXT PRIMARY KEY, username TEXT, issued TEXT, expires TEXT
+);
+-- Audit trail: append-only, every row carries the hash of the previous one (mqi.audit.verify).
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, actor TEXT, role TEXT, action TEXT, target TEXT,
+    detail TEXT, prev_hash TEXT, hash TEXT
+);
+-- Release review (QA) and approval (approver) with the evidence they signed. Append-only.
+CREATE TABLE IF NOT EXISTS release_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, lot_id TEXT, action TEXT,   -- review | approve | reject
+    level TEXT, comment TEXT, evidence TEXT, evidence_hash TEXT,
+    actor TEXT, actor_name TEXT, role TEXT, at TEXT, meaning TEXT
+);
 -- key/value: demo_version (which demo build created the data), rev (bumped on every write)
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY, value TEXT
@@ -112,6 +130,20 @@ _KEYS = {"lots": ["lot_id"], "genealogy": ["product_lot", "material"], "process"
          "changes": ["change_no"], "measurements": ["lot_id", "property", "source", "source_file"],
          "meta": ["key"]}
 _ready: set[str] = set()
+APPEND_ONLY = ("audit_log", "release_decisions")
+
+SQLITE_TRIGGERS = "".join(
+    f"CREATE TRIGGER IF NOT EXISTS {t}_no_{op.lower()} BEFORE {op} ON {t} "
+    f"BEGIN SELECT RAISE(ABORT, 'append-only table {t}'); END;\n"
+    for t in APPEND_ONLY for op in ("UPDATE", "DELETE"))
+
+PG_TRIGGERS = ["CREATE OR REPLACE FUNCTION mqi_append_only() RETURNS trigger AS $$ BEGIN "
+               "RAISE EXCEPTION 'append-only table %', TG_TABLE_NAME; END $$ LANGUAGE plpgsql"] + [
+    q for t in APPEND_ONLY for q in (
+        f"CREATE OR REPLACE TRIGGER {t}_append_only BEFORE UPDATE OR DELETE ON {t} "
+        "FOR EACH ROW EXECUTE FUNCTION mqi_append_only()",
+        f"CREATE OR REPLACE TRIGGER {t}_no_truncate BEFORE TRUNCATE ON {t} "
+        "FOR EACH STATEMENT EXECUTE FUNCTION mqi_append_only()")]
 
 
 # ---------------------------------------------------------------- target
@@ -253,7 +285,7 @@ def connect(path=None):
         con = _PgConnection(t)
         try:
             if t not in _ready:
-                for q in _pg_schema():
+                for q in _pg_schema() + PG_TRIGGERS:
                     con._con.execute(q)
                 _migrate(con, True)
                 con.commit()
@@ -274,7 +306,7 @@ def connect(path=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
     try:
-        con.executescript(SCHEMA)
+        con.executescript(SCHEMA + SQLITE_TRIGGERS)
         _migrate(con, False)
         yield con
         con.commit()

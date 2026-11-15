@@ -15,7 +15,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from . import config, db
+from . import audit, config, db
 
 
 def _cfg() -> dict:
@@ -140,7 +140,8 @@ def check(summary: pd.DataFrame, trace: pd.DataFrame) -> list[dict]:
 # ---------------------------------------------------------------- 4. store
 
 def record_run(lot_id: str, equipment: str, trace: pd.DataFrame, started: str | None = None,
-               ended: str | None = None, source: str = "opcua", complete: bool = True, dbpath=None) -> dict:
+               ended: str | None = None, source: str = "opcua", complete: bool = True, dbpath=None,
+               actor: str | None = None) -> dict:
     """Summarise, judge and store one run. Returns {id, status, alarms}.
 
     A run the collector joined half-way (complete=False) is stored and summarised but not judged:
@@ -172,6 +173,9 @@ def record_run(lot_id: str, equipment: str, trace: pd.DataFrame, started: str | 
         if len(tr):
             con.executemany("INSERT INTO equipment_trace (run_id, t_s, step, tag, value) VALUES (?,?,?,?,?)",
                             [(rid, float(r.t_s), r.step, r.tag, float(r.value)) for r in tr.itertuples()])
+        audit.record(con, actor or source, "equipment.run", f"lot/{lot_id}",
+                     {"run_id": int(rid), "equipment": equipment, "status": status,
+                      "alarms": [f"{a['step']}:{a['rule']}:{a['tag']}" for a in alarms]})
     return {"id": int(rid), "status": status, "alarms": alarms}
 
 

@@ -13,16 +13,20 @@ from __future__ import annotations
 import threading
 import time
 
-from fastapi import FastAPI, HTTPException, Query, Request
+import json
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 import pandas as pd
 
-from mqi import __version__, config, db, demo, engine, fdc, oos, outgoing
+from mqi import __version__, approval, audit, auth, config, db, demo, engine, fdc, oos, outgoing
 from mqi.insight import rules
 
-from .schemas import (AskIn, AskOut, EquipmentRun, EquipmentRunDetail, EquipmentRunIn, EquipmentRunResult, FdcAlarm, Finding, Health,
+from .schemas import (Approval, AskIn, AskOut, AuditCheck, AuditEntry, Decision, LoginIn, Me, SignIn, Token,
+                      EquipmentRun, EquipmentRunDetail, EquipmentRunIn, EquipmentRunResult, FdcAlarm, Finding, Health,
                       HistoryRow, Investigation, LotStatus, OpenInvestigation, Phase1, Phase2, Reason, ReleaseDetail,
                       Retest)
 
@@ -31,8 +35,29 @@ app = FastAPI(
     version=__version__,
     description="Release decisions, test history and OOS investigations for an electronic-materials plant. "
                 "Results are never edited: retests are added, and a failing result is set aside only by an "
-                "OOS investigation that proves a laboratory error.",
+                "OOS investigation that proves a laboratory error. A lot is released by two electronic "
+                "signatures (QA review, then the approver), each bound to a hash of the evidence it covered.\n\n"
+                "Sign in with POST /api/v1/auth/token and send `Authorization: Bearer <token>`.",
 )
+
+# ---------------------------------------------------------------- users
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def current_user(cred: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> dict:
+    u = auth.user_for_token(cred.credentials) if cred else None
+    if not u:
+        raise HTTPException(401, "sign in first (POST /api/v1/auth/token)", headers={"WWW-Authenticate": "Bearer"})
+    return u
+
+
+def need(perm: str):
+    def dep(u: dict = Depends(current_user)) -> dict:
+        if not auth.can(u, perm):
+            raise HTTPException(403, f"role {u['role']} may not do this ({perm})")
+        return u
+    return dep
 
 # ---------------------------------------------------------------- analysis cache
 
@@ -65,6 +90,11 @@ def _require_lot(b, lot_id: str) -> None:
         raise HTTPException(404, f"lot {lot_id} not found")
 
 
+@app.exception_handler(approval.Denied)
+async def _denied(_: Request, exc: approval.Denied):
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
 @app.exception_handler(ValueError)
 async def _rule_violation(_: Request, exc: ValueError):
     """A business rule refused the request (e.g. retest before an OOS investigation).
@@ -84,6 +114,23 @@ async def _timing(request: Request, call_next):
     return response
 
 
+# ---------------------------------------------------------------- sign-in
+
+@app.post("/api/v1/auth/token", response_model=Token, tags=["users"])
+def login(body: LoginIn):
+    """Exchange a user ID and password for a bearer token (valid 12 h). Failed attempts are audited."""
+    u = auth.check_password(body.username, body.password)
+    if not u:
+        raise HTTPException(401, "wrong user ID or password")
+    tok, exp = auth.issue_token(u)
+    return Token(access_token=tok, expires=exp, **u)
+
+
+@app.get("/api/v1/auth/me", response_model=Me, tags=["users"])
+def me(u: dict = Depends(current_user)):
+    return Me(**u, permissions=sorted(p for p in auth.PERMS if auth.can(u, p)))
+
+
 # ---------------------------------------------------------------- health
 
 @app.get("/health", response_model=Health, tags=["system"])
@@ -97,7 +144,7 @@ def health():
 # ---------------------------------------------------------------- release
 
 @app.get("/api/v1/lots", response_model=list[LotStatus], tags=["release"])
-def lots(limit: int = Query(40, ge=1, le=500), status: str | None = Query(None, pattern="^(release|hold|block)$")):
+def lots(limit: int = Query(40, ge=1, le=500), status: str | None = Query(None, pattern="^(release|hold|block)$"), _u: dict = Depends(need("read"))):
     """Release status of the latest lots, newest first."""
     b = bundle()
     st = outgoing.batch_status(b, limit)
@@ -109,7 +156,7 @@ def lots(limit: int = Query(40, ge=1, le=500), status: str | None = Query(None, 
 
 
 @app.get("/api/v1/lots/{lot_id}/release", response_model=ReleaseDetail, tags=["release"])
-def release(lot_id: str):
+def release(lot_id: str, _u: dict = Depends(need("read"))):
     """Release decision for one lot with the reportable value of every specified property."""
     b = bundle()
     _require_lot(b, lot_id)
@@ -122,7 +169,7 @@ def release(lot_id: str):
 
 
 @app.get("/api/v1/lots/{lot_id}/history", response_model=list[HistoryRow], tags=["test history"])
-def history(lot_id: str, property: str | None = None):
+def history(lot_id: str, property: str | None = None, _u: dict = Depends(need("read"))):
     """Every in-house result of the lot in test order, including invalidated ones."""
     h = oos.history(lot_id, property)
     if h.empty:
@@ -133,11 +180,11 @@ def history(lot_id: str, property: str | None = None):
 
 
 @app.post("/api/v1/lots/{lot_id}/retests", status_code=201, tags=["test history"])
-def add_retest(lot_id: str, body: Retest):
+def add_retest(lot_id: str, body: Retest, u: dict = Depends(need("test.write"))):
     """Add a repeat test next to the original result. Refused (409) while a failing result has no OOS
-    investigation."""
-    mid = oos.add_retest(lot_id, body.property, body.value, body.attempt, body.reason, body.operator,
-                         body.instrument or "")
+    investigation. Role qc or qa."""
+    mid = oos.add_retest(lot_id, body.property, body.value, body.attempt, body.reason, body.operator or u["name"],
+                         body.instrument or "", actor=u["username"], role=u["role"])
     return {"id": mid}
 
 
@@ -151,35 +198,36 @@ def _inv(no: str) -> Investigation:
 
 
 @app.get("/api/v1/oos", response_model=list[Investigation], tags=["OOS"])
-def investigations(open_only: bool = False):
+def investigations(open_only: bool = False, _u: dict = Depends(need("read"))):
     df = oos.investigations(open_only=open_only)
     return [Investigation(**{k: _clean(v) for k, v in r.items()}) for r in df.to_dict("records")]
 
 
 @app.get("/api/v1/oos/{no}", response_model=Investigation, tags=["OOS"])
-def investigation(no: str):
+def investigation(no: str, _u: dict = Depends(need("read"))):
     return _inv(no)
 
 
 @app.post("/api/v1/oos", response_model=Investigation, status_code=201, tags=["OOS"])
-def open_investigation(body: OpenInvestigation):
-    """Open an investigation on the first failing result of the lot/property that has none."""
-    return _inv(oos.open_investigation(body.lot_id, body.property, body.opened_by))
+def open_investigation(body: OpenInvestigation, u: dict = Depends(need("test.write"))):
+    """Open an investigation on the first failing result of the lot/property that has none. Role qc or qa."""
+    return _inv(oos.open_investigation(body.lot_id, body.property, u["name"], actor=u["username"], role=u["role"]))
 
 
 @app.post("/api/v1/oos/{no}/phase1", response_model=Investigation, tags=["OOS"])
-def phase1(no: str, body: Phase1):
-    """Laboratory phase. A proven lab error (with category and evidence) invalidates the failing result."""
+def phase1(no: str, body: Phase1, u: dict = Depends(need("test.write"))):
+    """Laboratory phase. A proven lab error (with category and evidence) invalidates the failing result.
+    Role qc or qa."""
     _inv(no)
-    oos.record_phase1(no, body.lab_error, body.cause, body.by, body.category)
+    oos.record_phase1(no, body.lab_error, body.cause, u["name"], body.category, actor=u["username"], role=u["role"])
     return _inv(no)
 
 
 @app.post("/api/v1/oos/{no}/phase2", response_model=Investigation, tags=["OOS"])
-def phase2(no: str, body: Phase2):
-    """Manufacturing phase after no lab error was found: the OOS is confirmed with a disposition."""
+def phase2(no: str, body: Phase2, u: dict = Depends(need("oos.phase2"))):
+    """Manufacturing phase after no lab error was found: the OOS is confirmed with a disposition. Role qa."""
     _inv(no)
-    oos.record_phase2(no, body.finding, body.disposition, body.by)
+    oos.record_phase2(no, body.finding, body.disposition, u["name"], actor=u["username"], role=u["role"])
     return _inv(no)
 
 
@@ -190,23 +238,24 @@ def _rec(d: dict) -> dict:
 
 
 @app.post("/api/v1/equipment/runs", response_model=EquipmentRunResult, status_code=201, tags=["equipment"])
-def post_run(body: EquipmentRunIn):
+def post_run(body: EquipmentRunIn, u: dict = Depends(need("equipment.write"))):
     """Receive one equipment run (raw trace) from a collector. The server resamples it, summarises every recipe
     step, applies config/fdc.yaml and stores the result. An alarm puts the lot on QA hold. A run the collector
     joined half-way (complete=false) is stored as 'incomplete' and not judged."""
     trace = pd.DataFrame([s.model_dump() for s in body.samples])
-    r = fdc.record_run(body.lot_id, body.equipment, trace, body.started, body.ended, body.source, body.complete)
+    r = fdc.record_run(body.lot_id, body.equipment, trace, body.started, body.ended, body.source, body.complete,
+                       actor=u["username"])
     return EquipmentRunResult(id=r["id"], status=r["status"], alarms=[FdcAlarm(**_rec(a)) for a in r["alarms"]])
 
 
 @app.get("/api/v1/equipment/runs", response_model=list[EquipmentRun], tags=["equipment"])
 def list_runs(lot_id: str | None = None, status: str | None = Query(None, pattern="^(ok|alarm|incomplete)$"),
-              source: str | None = None, limit: int = Query(100, ge=1, le=1000)):
+              source: str | None = None, limit: int = Query(100, ge=1, le=1000), _u: dict = Depends(need("read"))):
     return [EquipmentRun(**_rec(r)) for r in fdc.runs(lot_id, status, source, limit).to_dict("records")]
 
 
 @app.get("/api/v1/equipment/runs/{run_id}", response_model=EquipmentRunDetail, tags=["equipment"])
-def get_run(run_id: int, trace: bool = False):
+def get_run(run_id: int, trace: bool = False, _u: dict = Depends(need("read"))):
     d = fdc.run_detail(run_id)
     if not d:
         raise HTTPException(404, f"run {run_id} not found")
@@ -219,7 +268,7 @@ def get_run(run_id: int, trace: bool = False):
 # ---------------------------------------------------------------- assistant
 
 @app.post("/api/v1/assistant/ask", response_model=AskOut, tags=["assistant"])
-def ask(body: AskIn):
+def ask(body: AskIn, _u: dict = Depends(need("read"))):
     """Ask the quality assistant. It looks up plant data with read-only tools and searches plant documents,
     answers with sources, and reports whether every number, lot and source in the answer is backed by what it
     looked up (grounding). It never changes data."""
@@ -231,17 +280,86 @@ def ask(body: AskIn):
     return AskOut(**d)
 
 
+# ---------------------------------------------------------------- release approval
+
+def _approval(b, lot_id: str, st: dict) -> Approval:
+    return Approval(lot_id=lot_id, stage=st["stage"], stale=st["stale"], coa_ready=st["coa_ready"], level=st["level"],
+                    current_hash=st["current_hash"], history=[Decision(**r) for r in st["history"]])
+
+
+@app.get("/api/v1/lots/{lot_id}/approval", response_model=Approval, tags=["release approval"])
+def get_approval(lot_id: str, _u: dict = Depends(need("read"))):
+    """Signatures on the lot and whether the latest one still covers the current evidence."""
+    b = bundle()
+    _require_lot(b, lot_id)
+    return _approval(b, lot_id, approval.state(b, lot_id))
+
+
+def _sign(fn, lot_id: str, body: SignIn, u: dict) -> Approval:
+    b = bundle()
+    _require_lot(b, lot_id)
+    fn(b, lot_id, u, body.password, body.comment)
+    _cache.clear()
+    b = bundle()
+    return _approval(b, lot_id, approval.state(b, lot_id))
+
+
+@app.post("/api/v1/lots/{lot_id}/review", response_model=Approval, tags=["release approval"])
+def review(lot_id: str, body: SignIn, u: dict = Depends(need("release.review"))):
+    """QA review signature (role qa). Not for a blocked lot; a hold lot needs a comment."""
+    return _sign(approval.review, lot_id, body, u)
+
+
+@app.post("/api/v1/lots/{lot_id}/approve", response_model=Approval, tags=["release approval"])
+def approve(lot_id: str, body: SignIn, u: dict = Depends(need("release.approve"))):
+    """Release approval (role approver, not the reviewer). Refused if the evidence changed since the QA review."""
+    return _sign(approval.approve, lot_id, body, u)
+
+
+@app.post("/api/v1/lots/{lot_id}/reject", response_model=Approval, tags=["release approval"])
+def reject(lot_id: str, body: SignIn, u: dict = Depends(need("release.approve"))):
+    """Reject a reviewed lot (role approver). A comment is required."""
+    return _sign(approval.reject, lot_id, body, u)
+
+
+@app.get("/api/v1/release-decisions/{decision_id}/evidence", tags=["release approval"])
+def decision_evidence(decision_id: int, _u: dict = Depends(need("read"))):
+    """The evidence snapshot a signature was given, and a re-computed hash to compare with the stored one."""
+    d = approval.decision(decision_id)
+    if not d:
+        raise HTTPException(404, f"decision {decision_id} not found")
+    return {"decision_id": decision_id, "evidence_hash": d["evidence_hash"],
+            "recomputed_hash": approval.digest(d["evidence"]), "evidence": d["evidence"]}
+
+
+# ---------------------------------------------------------------- audit trail
+
+@app.get("/api/v1/audit", response_model=list[AuditEntry], tags=["audit"])
+def audit_entries(target: str | None = Query(None, description="e.g. lot/UF-2611-003"), action: str | None = None,
+                  limit: int = Query(200, ge=1, le=5000), _u: dict = Depends(need("audit.read"))):
+    """Who did what, newest first (roles qa, approver, admin)."""
+    df = audit.entries(target, action, limit)
+    return [AuditEntry(**{**{k: _clean(v) for k, v in r.items()}, "detail": json.loads(r["detail"] or "{}")})
+            for r in df.to_dict("records")]
+
+
+@app.get("/api/v1/audit/verify", response_model=AuditCheck, tags=["audit"])
+def audit_verify(_u: dict = Depends(need("audit.read"))):
+    """Re-compute the hash chain of the whole audit trail."""
+    return AuditCheck(**audit.verify())
+
+
 # ---------------------------------------------------------------- overview
 
 @app.get("/api/v1/findings", response_model=list[Finding], tags=["overview"])
-def findings():
+def findings(_u: dict = Depends(need("read"))):
     """The prioritised action list shown on the overview page."""
     return [Finding(key=f.key, area=f.area, severity=f.severity, title=f.title, evidence=f.evidence,
                     action=f.action) for f in rules.findings(bundle())]
 
 
 @app.post("/api/v1/demo/rebuild", tags=["system"], include_in_schema=True)
-def rebuild_demo():
+def rebuild_demo(_u: dict = Depends(need("demo.rebuild"))):
     """Rebuild the synthetic demo plant (only allowed while the store holds demo data or nothing)."""
     if db.exists() and db.get_meta("demo_version") is None:
         raise HTTPException(403, "the store holds plant data, not demo data")

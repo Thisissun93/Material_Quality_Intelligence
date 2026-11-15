@@ -11,6 +11,7 @@ Run:  python -m collector.main
 Env:  OPCUA_ENDPOINT  opc.tcp://equipment:4840/mqi/
       EQUIPMENT       M1,M2
       MQI_API_URL     http://api:8000
+      MQI_COLLECTOR_USER / MQI_COLLECTOR_PASSWORD   service account (role "service") used to sign in
       POLL_S          0.5
       SPOOL_DIR       ./spool
 """
@@ -136,13 +137,28 @@ class Sender:
         return n
 
 
-def http_poster(api: str, timeout: float = 30) -> Callable[[dict], Awaitable[None]]:
+def http_poster(api: str, timeout: float = 30, username: str | None = None,
+                password: str | None = None) -> Callable[[dict], Awaitable[None]]:
+    """POST runs with the collector's service account. Signs in on first use and again when the token expires;
+    while sign-in fails the batches stay in the spool."""
     import httpx
 
     client = httpx.AsyncClient(base_url=api, timeout=timeout)
+    token: dict = {}
+
+    async def sign_in() -> None:
+        r = await client.post("/api/v1/auth/token", json={"username": username, "password": password})
+        if r.status_code != 200:
+            raise RuntimeError(f"sign-in as {username} refused ({r.status_code})")
+        token["h"] = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
     async def post(payload: dict) -> None:
-        r = await client.post("/api/v1/equipment/runs", json=payload)
+        if username and "h" not in token:
+            await sign_in()
+        r = await client.post("/api/v1/equipment/runs", json=payload, headers=token.get("h"))
+        if r.status_code == 401 and username:          # token expired or revoked
+            await sign_in()
+            r = await client.post("/api/v1/equipment/runs", json=payload, headers=token.get("h"))
         if r.status_code >= 500 or r.status_code in (408, 429):
             r.raise_for_status()             # retry later
         if r.status_code >= 400:             # the API refused the data itself: keep it, but say why
@@ -192,7 +208,9 @@ async def main() -> None:
     endpoint = os.environ.get("OPCUA_ENDPOINT", "opc.tcp://localhost:4840/mqi/")
     equipment = [e.strip() for e in os.environ.get("EQUIPMENT", "M1,M2").split(",") if e.strip()]
     api = os.environ.get("MQI_API_URL", "http://localhost:8000")
-    sender = Sender(http_poster(api), Path(os.environ.get("SPOOL_DIR", "spool")))
+    sender = Sender(http_poster(api, username=os.environ.get("MQI_COLLECTOR_USER", "collector"),
+                                password=os.environ.get("MQI_COLLECTOR_PASSWORD", "demo1234")),
+                    Path(os.environ.get("SPOOL_DIR", "spool")))
 
     async def retry_loop():
         while True:

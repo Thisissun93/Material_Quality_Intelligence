@@ -94,4 +94,12 @@ def client(demo, tmp_path, monkeypatch):
     from api import main
 
     main._cache.clear()
-    return TestClient(main.app)
+    c = TestClient(main.app)
+    c.headers.update(login(c, "qa.lee"))           # most tests act as QA; see login() for other roles
+    return c
+
+
+def login(c, username: str, password: str = "demo1234") -> dict:
+    r = c.post("/api/v1/auth/token", json={"username": username, "password": password})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}

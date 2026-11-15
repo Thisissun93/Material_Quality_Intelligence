@@ -57,7 +57,9 @@ def release_check(b, lot: str, oos_flags: list | None = None,
     return level, reasons
 
 
-def pdf(b, lot: str, customer: str, qty_kg: float = 200, po: str = "", draft: bool = False) -> bytes:
+def pdf(b, lot: str, customer: str, qty_kg: float = 200, po: str = "", draft: bool = False,
+        signoff: dict | None = None) -> bytes:
+    """CoA. signoff (from approval.signoff) fills the signature block; without it the CoA is a draft."""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet
@@ -108,14 +110,21 @@ def pdf(b, lot: str, customer: str, qty_kg: float = 200, po: str = "", draft: bo
     tt.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 9),
                             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
                             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("ALIGN", (5, 1), (5, -1), "RIGHT")]))
-    sign = Table([["Tested by (QC)", "Approved by (QA)", "Issue date"],
-                  ["", "", f"{pd.Timestamp.today():%Y-%m-%d}"]], colWidths=[58 * mm] * 3, rowHeights=[6 * mm, 14 * mm])
+    so = signoff or {}
+    sig = lambda who, at: (f"{who}\n(e-signed {str(at)[:16].replace('T', ' ')})" if who else "")  # noqa: E731
+    sign = Table([["Reviewed by (QA)", "Release approved by", "Issue date"],
+                  [sig(so.get("reviewed_by"), so.get("reviewed_at")), sig(so.get("approved_by"), so.get("approved_at")),
+                   f"{pd.Timestamp.today():%Y-%m-%d}"]], colWidths=[58 * mm] * 3, rowHeights=[6 * mm, 14 * mm])
     sign.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.grey), ("FONTSIZE", (0, 0), (-1, -1), 9),
+                              ("VALIGN", (0, 1), (-1, 1), "MIDDLE"),
                               ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9"))]))
     doc.build([head, Spacer(1, 6 * mm), Paragraph("<b><font size=14>CERTIFICATE OF ANALYSIS</font></b>", st["Title"]),
                Spacer(1, 2 * mm), ti, Spacer(1, 6 * mm), tt, Spacer(1, 6 * mm),
                Paragraph("We certify that this lot was tested according to the methods above and conforms to the "
-                         "agreed specification.", st["Normal"]), Spacer(1, 8 * mm), sign],
+                         "agreed specification.", st["Normal"]), Spacer(1, 8 * mm), sign] +
+              ([Spacer(1, 3 * mm), Paragraph(f"<font size=7 color='#6b7280'>Release record: evidence SHA-256 "
+                                             f"{so['evidence_hash'][:16]}… (verifiable in MQI)</font>", st["Normal"])]
+               if so.get("evidence_hash") else []),
               onFirstPage=mark, onLaterPages=mark)
     return buf.getvalue()
 

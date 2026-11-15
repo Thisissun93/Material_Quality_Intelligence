@@ -18,7 +18,7 @@ if getattr(sys, "_mqi_sig", None) != _SIG:
     sys._mqi_sig = _SIG
 
 import ui  # noqa: E402
-from views import (actions, assistant, capability, intake, msa, overview, release, report, settings, shipping, spc,
+from views import (actions, assistant, audit_trail, capability, intake, msa, overview, release, report, settings, shipping, spc,
                    supplier)
 
 st.set_page_config(page_title="Material Quality Intelligence", page_icon="◆", layout="wide")
@@ -53,6 +53,7 @@ pages = {
         st.Page(actions.render, title=ui.t("nav_actions"), icon=":material/task_alt:", url_path="actions"),
         st.Page(shipping.render, title=ui.t("nav_ship"), icon=":material/verified:", url_path="shipping"),
         st.Page(assistant.render, title=ui.t("nav_assistant"), icon=":material/forum:", url_path="assistant"),
+        st.Page(audit_trail.render, title=ui.t("nav_audit"), icon=":material/history:", url_path="audit"),
         st.Page(settings.render, title=ui.t("nav_settings"), icon=":material/tune:", url_path="settings"),
     ],
 }
@@ -66,9 +67,17 @@ if not ui.db.exists() or _demo.is_stale():
         _demo.build()
     ui.clear()
 
+# a plant store (not the demo) shows nothing before sign-in
+if not ui.is_demo() and not ui.user():
+    st.title(ui.t("app"))
+    ui.sign_in_form("main")
+    st.stop()
+
 with st.sidebar:
     st.divider()
-    if st.button(ui.t("demo"), width="stretch"):
+    ui.user_box()
+    st.divider()
+    if ui.is_demo() and st.button(ui.t("demo"), width="stretch"):
         from mqi import demo
         with st.spinner("…"):
             res = demo.build()

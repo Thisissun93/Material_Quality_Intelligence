@@ -14,7 +14,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from . import config, db
+from . import audit, config, db
 from .insight.rules import lab, num
 
 ATTEMPTS = ["remeasure", "resample"]
@@ -75,7 +75,8 @@ def uninvestigated(lot: str, prop: str, dbpath=None) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- actions
 
-def open_investigation(lot: str, prop: str, by: str, dbpath=None) -> str:
+def open_investigation(lot: str, prop: str, by: str, dbpath=None, actor: str | None = None,
+                       role: str | None = None) -> str:
     """Open an OOS investigation on the first failing result that has none."""
     if not by.strip():
         raise ValueError("조사 담당자를 입력하세요 / investigator is required")
@@ -90,11 +91,13 @@ def open_investigation(lot: str, prop: str, by: str, dbpath=None) -> str:
                     "phase1, outcome) VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (no, lot, prop, float(r["value"]), r["source_file"], r["measured_at"], _now(), by.strip(),
                      "pending", "open"))
+        audit.record(con, actor or by.strip(), "oos.open", f"lot/{lot}",
+                     {"no": no, "property": prop, "value": float(r["value"])}, role)
     return no
 
 
 def add_retest(lot: str, prop: str, value: float, attempt: str, reason: str, operator: str,
-               instrument: str = "", dbpath=None) -> int:
+               instrument: str = "", dbpath=None, actor: str | None = None, role: str | None = None) -> int:
     """Record a repeat test next to the original. Returns the new measurement id."""
     if attempt not in ATTEMPTS:
         raise ValueError(f"attempt must be one of {ATTEMPTS}")
@@ -112,10 +115,14 @@ def add_retest(lot: str, prop: str, value: float, attempt: str, reason: str, ope
             "operator, measured_at, source_file, attempt, reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (lot, "product", prop, float(value), _spec(prop)["unit"], "inhouse", instrument or "manual entry",
              "retest", operator.strip(), at, f"retest:{lot}:{prop}:{at}", attempt, reason.strip()))
+        audit.record(con, actor or operator.strip(), "test.retest", f"lot/{lot}",
+                     {"measurement_id": cur.lastrowid, "property": prop, "value": float(value), "attempt": attempt,
+                      "reason": reason.strip(), "analyst": operator.strip()}, role)
         return cur.lastrowid
 
 
-def record_phase1(no: str, lab_error: bool, cause: str, by: str, category: str | None = None, dbpath=None) -> None:
+def record_phase1(no: str, lab_error: bool, cause: str, by: str, category: str | None = None, dbpath=None,
+                  actor: str | None = None, role: str | None = None) -> None:
     """Phase 1 (laboratory). A proven lab error invalidates the failing result; otherwise it stands."""
     inv = investigation(no, dbpath)
     if not inv or inv["phase1"] != "pending":
@@ -129,9 +136,13 @@ def record_phase1(no: str, lab_error: bool, cause: str, by: str, category: str |
                     "outcome=? WHERE no=?",
                     ("lab_error" if lab_error else "no_lab_error", category if lab_error else None, cause.strip(),
                      by.strip(), _now(), "invalidated" if lab_error else "open", no))
+        audit.record(con, actor or by.strip(), "oos.phase1", f"lot/{inv['lot_id']}",
+                     {"no": no, "lab_error": bool(lab_error), "category": category if lab_error else None,
+                      "cause": cause.strip()}, role)
 
 
-def record_phase2(no: str, finding: str, disposition: str, by: str, dbpath=None) -> None:
+def record_phase2(no: str, finding: str, disposition: str, by: str, dbpath=None, actor: str | None = None,
+                  role: str | None = None) -> None:
     """Phase 2 (manufacturing), only after Phase 1 found no lab error. The OOS is confirmed."""
     inv = investigation(no, dbpath)
     if not inv or inv["phase1"] != "no_lab_error" or inv["outcome"] != "open":
@@ -142,6 +153,8 @@ def record_phase2(no: str, finding: str, disposition: str, by: str, dbpath=None)
     with db.connect(dbpath) as con:
         con.execute("UPDATE oos SET phase2_finding=?, disposition=?, phase2_by=?, phase2_at=?, outcome='confirmed' "
                     "WHERE no=?", (finding.strip(), disposition, by.strip(), _now(), no))
+        audit.record(con, actor or by.strip(), "oos.phase2", f"lot/{inv['lot_id']}",
+                     {"no": no, "disposition": disposition, "finding": finding.strip()}, role)
 
 
 # ---------------------------------------------------------------- release
