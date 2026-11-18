@@ -4,6 +4,13 @@
 ![python](https://img.shields.io/badge/python-3.12-3776AB)
 ![streamlit](https://img.shields.io/badge/app-Streamlit-FF4B4B)
 
+> **English summary** — Material quality app for semiconductor packaging materials (underfill, epoxy). It reads test files from different instruments, runs MSA, Cpk, SPC and T², checks supplier CoA data, and writes 8D and SCAR reports with real data. A retest cannot hide the first OOS result, and shipping needs two e-signatures (QA review and approval).
+>
+> - **Result:** For one customer complaint lot, it collects 61 records from 6 systems in 0.2 seconds. This work took me almost half a day by hand. ([benchmark](docs/benchmark_investigation.md))
+> - **Check:** 28 statistics (Gage R&R, Cpk, EWMA, CUSUM, T² and more) match independent calculations. 100 tests run in CI. ([validation](docs/stats_validation.md))
+> - The demo app also has an English mode.
+> - All data is synthetic. The numbers check the method and the calculations, not accuracy in a real factory.
+
 반도체 패키징 소재(언더필·에폭시 접착제) 공장의 품질 데이터를 **장비 제조사·펌웨어·단위·언어에 상관없이 자동으로 모으고**, MSA·공정능력·SPC·공급사 품질·원료→제품 예측을 한 번에 분석해 **8D·SCAR·출하 성적서까지 만들어 주는** Streamlit 앱입니다. 재시험 합격으로 최초 부적합을 덮지 못하도록 **OOS 조사 이력**을 관리하고, 출하는 **QA 검토와 승인자 승인, 두 사람의 전자서명**으로 결정하며 그 근거를 그대로 보존합니다.
 
 **▶ [데모 앱 열기](https://materialqualityintelligence-dknsnjemfstfko4zluzplu.streamlit.app/)** (설치 없이 브라우저에서 바로 실행, 한국어/English)

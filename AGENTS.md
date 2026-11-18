@@ -19,3 +19,5 @@ Material Quality Intelligence(MQI): 반도체 패키징 소재(언더필·에폭
 - **DB 호환**: 새 SQL이 SQLite와 PostgreSQL 양쪽에서 동작하는지(`mqi/db.py`의 변환을 거치는지).
 - **보안**: 비밀번호·토큰 평문 저장, SQL 문자열 결합에 의한 주입, 비밀값 커밋.
 - **문서와 수치**: README·`docs/`의 수치가 스크립트 출력과 맞는지, 합성 데이터라는 전제가 빠지지 않는지.
+
+- README 맨 위의 영어 요약(English summary)에 있는 수치는 한국어 본문·docs와 같아야 합니다. 수치를 바꾸는 PR에서 영어 요약이 갱신되지 않았으면 지적하세요.
