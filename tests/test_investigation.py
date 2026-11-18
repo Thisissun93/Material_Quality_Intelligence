@@ -51,3 +51,10 @@ def test_changes_window_uses_production_date(bundle):
     c = p.data["changes"]
     if len(c):
         assert (c["days_from_start"] <= 0).all() and (c["days_from_start"] >= -60).all()
+
+
+def test_markdown_includes_complaint_8d(bundle):
+    """Codex review: the complaint 8D draft must appear in the exported pack."""
+    lot = qms.complaints(bundle.dbpath).iloc[0]["lot_id"]
+    md = investigation.markdown(investigation.collect(bundle, lot))
+    assert "D4" in md and "생략했습니다" not in md

@@ -193,8 +193,11 @@ def markdown(inv: Investigation, max_rows: int = 12) -> str:
     for key, label, systems in SECTIONS:
         v = inv.data.get(key)
         if key == "eightd":
-            if not v:
-                L += [f"## {label}", "", "이 로트에는 고객 클레임이 없어 생략했습니다. 공정 전체 SPC 경보 기준 8D는 `보고서` 화면에 있습니다.", ""]
+            L += [f"## {label}", ""]
+            if v:
+                L += [v.replace("\n#", "\n###"), ""]   # demote the draft's headings under this section
+            else:
+                L += ["이 로트에는 고객 클레임이 없어 생략했습니다. 공정 전체 SPC 경보 기준 8D는 `보고서` 화면에 있습니다.", ""]
             continue
         n = len(v) if isinstance(v, pd.DataFrame) else 0
         L.append(f"## {label}{' · ' + ', '.join(systems) if systems else ''} ({n}건)")

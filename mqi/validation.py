@@ -144,25 +144,34 @@ def _spc(b) -> list[dict]:
 
 
 def _t2(b) -> list[dict]:
+    """Checks the T² values the app actually produced (b.t2), in whichever reference mode is configured."""
     from .engine import T2_PROPS
     cfg = config.rules()["spc"]
+    if b.t2 is None:
+        return []
     props = [p for p in T2_PROPS if p in b.product]
-    X = b.product[props].astype(float).dropna().reset_index(drop=True)
-    window, alpha = cfg.get("t2_window") or 30, cfg.get("t2_alpha", 0.01)
-    res = spc.hotelling(X, b.baseline, alpha, window=window)
-    Xv = X.values
-    errs = []
-    for i in range(window, len(X)):
-        ref = Xv[i - window:i]
+    X = b.product[props].astype(float)
+    window, alpha = cfg.get("t2_window", 30), cfg.get("t2_alpha", 0.01)
+    Xv, base = X.values, b.baseline
+    errs, m = [], None
+    for i in range(len(X)):
+        if window:
+            if i < window:
+                continue
+            ref = Xv[i - window:i]
+        else:
+            ref = Xv[:base]
+        m = len(ref)
         vi = np.linalg.inv(np.cov(ref, rowvar=False))
-        errs.append(abs(mahalanobis(Xv[i], ref.mean(axis=0), vi) ** 2 - res["t2"].iloc[i]))
-    p, m = len(props), window
+        errs.append(abs(mahalanobis(Xv[i], ref.mean(axis=0), vi) ** 2 - b.t2["t2"].iloc[i]))
+    p = len(props)
     ucl = p * (m + 1) * (m - 1) / (m * (m - p)) * stats.f.ppf(1 - alpha, p, m - p)
-    rel = max(errs) / max(1.0, float(np.nanmax(res["t2"])))
+    rel = max(errs) / max(1.0, float(np.nanmax(b.t2["t2"])))
+    mode = f"직전 {window}개 로트 기준" if window else f"고정 기준 구간 {base}개 로트"
     return [
-        _row("다변량", f"Hotelling T² 상대 최대 편차 ({len(errs)}개 로트)", rel, 0.0,
+        _row("다변량", f"Hotelling T² 상대 최대 편차 ({len(errs)}개 로트, {mode})", rel, 0.0,
              "scipy 마할라노비스 거리², 역행렬 np.linalg.inv", tol=1e-8),
-        _row("다변량", "T² 관리한계 (α=0.01, Phase II)", res["ucl"].iloc[-1], ucl, "F 분포 식 직접 계산"),
+        _row("다변량", f"T² 관리한계 (α={alpha}, Phase II)", b.t2["ucl"].iloc[-1], ucl, "F 분포 식 직접 계산"),
     ]
 
 
