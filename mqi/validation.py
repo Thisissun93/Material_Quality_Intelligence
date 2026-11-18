@@ -110,7 +110,11 @@ def _spc(b) -> list[dict]:
     x = pd.Series(b.product["viscosity"], dtype=float).reset_index(drop=True)
     base = b.baseline
     lim = spc.baseline_limits(x.values, base, cfg.get("sigma", "overall"))
-    center, sigma = x.iloc[:base].mean(), x.iloc[:base].std(ddof=1)
+    center = x.iloc[:base].mean()
+    if cfg.get("sigma", "overall") == "moving_range":
+        sigma = x.iloc[:base].diff().abs().mean() / 1.128
+    else:
+        sigma = x.iloc[:base].std(ddof=1)
     lam, L = cfg.get("ewma_lambda", 0.2), cfg.get("ewma_L", 2.7)
     ew = spc.ewma(x.values, lim, lam, L)
     ref = pd.concat([pd.Series([center]), x]).ewm(alpha=lam, adjust=False).mean().iloc[1:].reset_index(drop=True)
@@ -126,7 +130,8 @@ def _spc(b) -> list[dict]:
     nl = spc.nelson(x.values, lim, (1, 2))
     side = np.sign(z)
     r2 = (side.rolling(9).apply(lambda s: abs(s.sum()) == 9, raw=True) == 1).fillna(False)
-    m = "기준 구간 평균·표본 표준편차"
+    m = ("기준 구간 평균·이동범위 σ(MR̄/1.128)" if cfg.get("sigma", "overall") == "moving_range"
+         else "기준 구간 평균·표본 표준편차")
     return [
         _row("SPC", "관리 중심선", lim.center, center, m),
         _row("SPC", "관리 σ", lim.sigma, sigma, m),
