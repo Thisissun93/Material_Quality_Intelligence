@@ -21,6 +21,7 @@ def test_complaint_pack_has_every_section(bundle):
 def test_oos_pack_keeps_first_result_and_blocks(bundle):
     p = investigation.collect(bundle, demo.OOS_DEMO_LOT, "viscosity")
     assert p.level == "block"
+    assert p.data["eightd"] == ""                              # no complaint: no lot-unrelated 8D
     h = p.data["history"]
     v = h[h["property"] == "viscosity"]
     assert (v["attempt"] == "initial").any() and v["oos"].any()
@@ -38,3 +39,15 @@ def test_markdown_lists_sections(bundle):
     md = investigation.markdown(p)
     assert md.startswith(f"# 조사 패키지: {demo.FDC_DEMO_LOT}")
     assert "투입 원료 로트" in md and "같은 원료를 쓴 다른 제품 로트" in md
+
+
+def test_changes_window_uses_production_date(bundle):
+    """Codex review: the 60-day 4M window must end at the lot's production date, not its test date."""
+    from mqi import db
+    lot = demo.FDC_DEMO_LOT
+    made = str(db.read("SELECT made_at FROM lots WHERE lot_id=?", (lot,), bundle.dbpath)["made_at"].iloc[0])[:10]
+    p = investigation.collect(bundle, lot)
+    assert p.made_at == made
+    c = p.data["changes"]
+    if len(c):
+        assert (c["days_from_start"] <= 0).all() and (c["days_from_start"] >= -60).all()

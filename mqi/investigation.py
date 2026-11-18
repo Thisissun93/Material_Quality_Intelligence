@@ -31,7 +31,7 @@ SECTIONS = [
     ("changes", "생산일 전 60일 4M 변경점", ("변경 이력",)),
     ("same_raw", "같은 원료를 쓴 다른 제품 로트", ("MES",)),
     ("complaints", "고객 클레임", ("QMS",)),
-    ("eightd", "8D 초안", ()),
+    ("eightd", "고객 클레임 8D 초안 (클레임이 있는 로트만)", ()),
 ]
 
 
@@ -39,6 +39,7 @@ SECTIONS = [
 class Investigation:
     lot: str
     prop: str
+    made_at: str | None = None
     level: str = ""
     reasons: list = field(default_factory=list)
     data: dict = field(default_factory=dict)        # key -> DataFrame (or str for eightd)
@@ -134,10 +135,17 @@ def collect(b, lot: str, prop: str | None = None, complaint: dict | None = None,
     _timed(inv, "equipment", equipment)
 
     def chg():
-        row = b.product[b.product["lot_id"] == lot]
-        if row.empty or prop not in b.product:
+        if prop not in b.product:
             return pd.DataFrame()
-        c = changes.changes_near(b, prop, str(row["measured_at"].iloc[0])[:10], before=60, after=0)
+        made = db.read("SELECT made_at FROM lots WHERE lot_id=?", (lot,), b.dbpath)
+        day = str(made["made_at"].iloc[0])[:10] if len(made) and pd.notna(made["made_at"].iloc[0]) else None
+        if not day:                                   # no lot master date: fall back to the first test date
+            row = b.product[b.product["lot_id"] == lot]
+            if row.empty:
+                return pd.DataFrame()
+            day = str(row["measured_at"].iloc[0])[:10]
+        inv.made_at = day
+        c = changes.changes_near(b, prop, day, before=60, after=0)
         keep = [k for k in ("change_no", "date", "category", "item", "description", "notified", "days_from_start")
                 if k in c]
         return c[keep].reset_index(drop=True) if len(c) else c
@@ -154,7 +162,10 @@ def collect(b, lot: str, prop: str | None = None, complaint: dict | None = None,
 
     _timed(inv, "same_raw", same_raw)
     _timed(inv, "complaints", lambda: on_lot.reset_index(drop=True) if len(on_lot) else pd.DataFrame())
-    _timed(inv, "eightd", lambda: eightd.markdown(eightd.build(b, prop, lang=lang, complaint=complaint)))
+    # The 8D builder is tied to a customer complaint (lot, symptom, containment). Without one it would
+    # describe the plant-wide SPC alarm instead of this lot, so the draft is only made for a complaint.
+    _timed(inv, "eightd", lambda: eightd.markdown(eightd.build(b, prop, lang=lang, complaint=complaint))
+           if complaint else "")
     return inv
 
 
@@ -175,13 +186,15 @@ def _table(df: pd.DataFrame) -> str:
 def markdown(inv: Investigation, max_rows: int = 12) -> str:
     """Readable summary of a pack (Korean)."""
     L = [f"# 조사 패키지: {inv.lot} ({inv.prop})", "",
-         f"- 출하 판정: **{inv.level}**",
+         f"- 출하 판정: **{inv.level}**, 생산일 {inv.made_at or '미상'}",
          f"- 데이터를 가져온 시스템 {len(inv.systems)}곳: {', '.join(inv.systems)}",
          f"- 모은 기록 {inv.n_records}건, "
          f"수집 시간 {inv.total_seconds:.2f}초", ""]
     for key, label, systems in SECTIONS:
         v = inv.data.get(key)
         if key == "eightd":
+            if not v:
+                L += [f"## {label}", "", "이 로트에는 고객 클레임이 없어 생략했습니다. 공정 전체 SPC 경보 기준 8D는 `보고서` 화면에 있습니다.", ""]
             continue
         n = len(v) if isinstance(v, pd.DataFrame) else 0
         L.append(f"## {label}{' · ' + ', '.join(systems) if systems else ''} ({n}건)")

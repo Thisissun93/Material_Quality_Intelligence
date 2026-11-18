@@ -72,7 +72,8 @@ def report(res: dict) -> str:
         L.append(f"| {r['case']} | {r['lot']} | {r['level']} | {r['n_systems']}곳 | {r['n_records']}건 | "
                  f"{r['total']:.2f}초 |")
     L += ["", f"- 분석 1회 실행 (`engine.run`, 새 데이터가 들어올 때 한 번): **{res['engine_seconds']:.1f}초**",
-          f"- 로트별 수집은 {res['repeat']}회 반복의 중앙값, 8D 초안 작성 포함",
+          f"- 로트별 수집은 {res['repeat']}회 반복의 중앙값. 고객 클레임 시나리오는 클레임 8D 초안 작성 시간 포함 "
+          "(클레임이 없는 로트는 8D를 만들지 않음)",
           f"- 환경: Python {res['python']}, {res['machine']}, SQLite, CPU만 사용", "",
           "## 수작업과 비교", "",
           "| 방식 | 로트 1건 자료 수집 | 근거 |", "|---|---|---|",
