@@ -1,0 +1,141 @@
+{
+  "engine_seconds": 2.6158350679999103,
+  "repeat": 5,
+  "python": "3.13.18",
+  "machine": "x86_64",
+  "cases": [
+    {
+      "case": "고객 클레임",
+      "lot": "UF-2611-001",
+      "level": "hold",
+      "systems": [
+        "LIMS",
+        "MES",
+        "QMS",
+        "공급사 CoA",
+        "변경 이력",
+        "설비 FDC"
+      ],
+      "n_systems": 6,
+      "n_records": 61,
+      "records": {
+        "release": 2,
+        "history": 5,
+        "oos": 0,
+        "genealogy": 3,
+        "raw": 10,
+        "coa_trust": 5,
+        "process": 5,
+        "equipment": 1,
+        "changes": 1,
+        "same_raw": 30,
+        "complaints": 1,
+        "eightd": 1
+      },
+      "seconds": {
+        "release": 0.024519056000031014,
+        "history": 0.010141672000031576,
+        "oos": 0.0011963570000261825,
+        "genealogy": 0.0009064300001000447,
+        "raw": 0.0011226369999803865,
+        "coa_trust": 0.0008376099999622966,
+        "process": 0.00092917100005252,
+        "equipment": 0.003911046999974133,
+        "changes": 0.01192457000001923,
+        "same_raw": 0.0012178980000498996,
+        "complaints": 0.00017051800000444928,
+        "eightd": 0.1201141029999917
+      },
+      "total": 0.17699106900022343,
+      "same_raw_lots": 11
+    },
+    {
+      "case": "최초 결과 OOS",
+      "lot": "UF-2610-014",
+      "level": "block",
+      "systems": [
+        "LIMS",
+        "MES",
+        "공급사 CoA",
+        "변경 이력",
+        "설비 FDC"
+      ],
+      "n_systems": 5,
+      "n_records": 48,
+      "records": {
+        "release": 1,
+        "history": 6,
+        "oos": 0,
+        "genealogy": 3,
+        "raw": 10,
+        "coa_trust": 5,
+        "process": 5,
+        "equipment": 1,
+        "changes": 2,
+        "same_raw": 16,
+        "complaints": 0,
+        "eightd": 1
+      },
+      "seconds": {
+        "release": 0.024712606999969466,
+        "history": 0.010070089999999254,
+        "oos": 0.0011737949999997,
+        "genealogy": 0.0010436869999921328,
+        "raw": 0.001181489000032343,
+        "coa_trust": 0.0008568769999328651,
+        "process": 0.0009766859999444932,
+        "equipment": 0.003787946999977976,
+        "changes": 0.014748505000056866,
+        "same_raw": 0.001101844999993773,
+        "complaints": 8.031300001221098e-05,
+        "eightd": 0.10599915200009491
+      },
+      "total": 0.165732993000006,
+      "same_raw_lots": 9
+    },
+    {
+      "case": "설비 FDC 알람",
+      "lot": "UF-2611-003",
+      "level": "hold",
+      "systems": [
+        "LIMS",
+        "MES",
+        "공급사 CoA",
+        "변경 이력",
+        "설비 FDC"
+      ],
+      "n_systems": 5,
+      "n_records": 60,
+      "records": {
+        "release": 1,
+        "history": 5,
+        "oos": 0,
+        "genealogy": 3,
+        "raw": 10,
+        "coa_trust": 5,
+        "process": 5,
+        "equipment": 1,
+        "changes": 1,
+        "same_raw": 30,
+        "complaints": 0,
+        "eightd": 1
+      },
+      "seconds": {
+        "release": 0.02554649400008202,
+        "history": 0.009188773000005312,
+        "oos": 0.0011348590001034609,
+        "genealogy": 0.0009441790000437322,
+        "raw": 0.0010929970000006506,
+        "coa_trust": 0.0008503190000510585,
+        "process": 0.0009136110001009001,
+        "equipment": 0.003681698000036704,
+        "changes": 0.012030142999947202,
+        "same_raw": 0.0011709919999702834,
+        "complaints": 9.782499989796634e-05,
+        "eightd": 0.12628165199998875
+      },
+      "total": 0.18293354200022804,
+      "same_raw_lots": 11
+    }
+  ]
+}

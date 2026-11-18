@@ -12,7 +12,24 @@
 
 ![overview](docs/img/overview.png)
 
-**목차** · [무엇이 다른가](#무엇이-다른가) · [3분 둘러보기](#3분-둘러보기) · [핵심 기능](#핵심-기능) · [심어 둔 문제와 결과](#데모-데이터에-심어-둔-문제와-앱이-찾은-결과) · [실행](#실행) · [서비스로 운영하기](#서비스로-운영하기-postgresql--rest-api--docker) · [검증](#검증) · [구조](#구조) · [English](#english-summary)
+**목차** · [업무 성과](#업무-성과-로트-1건-조사) · [무엇이 다른가](#무엇이-다른가) · [3분 둘러보기](#3분-둘러보기) · [핵심 기능](#핵심-기능) · [심어 둔 문제와 결과](#데모-데이터에-심어-둔-문제와-앱이-찾은-결과) · [실행](#실행) · [서비스로 운영하기](#서비스로-운영하기-postgresql--rest-api--docker) · [검증](#검증) · [구조](#구조) · [English](#english-summary)
+
+## 업무 성과: 로트 1건 조사
+
+클레임이나 OOS가 들어오면 품질 엔지니어는 한 로트에 대해 검사 이력(최초·재시험), OOS 기록, 투입 원료 로트와 공급사, 원료 수입검사·CoA 값, 배치 공정 기록, 설비 런·FDC 알람, 생산일 전후 4M 변경점, 같은 원료를 쓴 다른 로트를 여러 시스템에서 찾아 모읍니다. MQI는 이것을 한 번에 모으고 8D 초안까지 만듭니다.
+
+| 시나리오 | 로트 | 출하 판정 | 데이터를 가져온 시스템 | 모은 기록 | 수집 시간 |
+|---|---|---|---|---|---|
+| 고객 클레임 | UF-2611-001 | 보류 | 6곳 | 61건 | 0.18초 |
+| 최초 결과 OOS | UF-2610-014 | 불가 | 5곳 | 48건 | 0.17초 |
+| 설비 FDC 알람 | UF-2611-003 | 보류 | 5곳 | 60건 | 0.18초 |
+
+| 방식 | 로트 1건 자료 수집 |
+|---|---|
+| 수작업 | 반나절 가까이 (작성자가 양산 라인에서 실제로 겪은 시간, 계측값 아님) |
+| MQI | 분석 1회 약 2~3초 + 로트당 0.2초 이하 (합성 데모 데이터, CPU, 실행마다 조금씩 다름) |
+
+비교는 자료를 모으는 시간에 한정됩니다. 원인 판단과 대책 결정은 사람이 합니다. 측정 방법과 항목별 시간은 [측정 보고서](docs/benchmark_investigation.md), 실제 모은 내용은 [조사 패키지 예시](docs/investigation_example.md)에 있습니다. 다시 재려면 `python scripts/benchmark_investigation.py`.
 
 ## 무엇이 다른가
 
@@ -209,14 +226,14 @@ MQI_ASSISTANT_MODEL=qwen2.5:3b python -m mqi.assistant.eval --backend llm   # Ol
 | 최근 로트 1건: 첫 점도 4,640 mPa·s(USL 4,500, 측정자 Park) → 같은 시료 재측정 합격, OOS 조사 없음 | 재측정값으로 분석하되 최초 결과를 보존하고 "출하 불가: OOS 조사 필요" |
 | 최근 20개 로트의 믹서 런 중 UF-2611-003: 탈포 중 TC1이 5℃ 낮게 읽힘 (TC1은 60℃ 유지, 실제 65℃) | 20개 런 중 이 런만 알람(오알람 0), 원인 "TC1·TC2 편차 5.5℃", 출하 판정 보류 |
 
-위 결과는 `tests/`의 테스트 91개가 커밋마다 GitHub Actions에서 SQLite와 PostgreSQL 두 DB로 확인합니다.
+위 결과는 `tests/`의 테스트 96개가 커밋마다 GitHub Actions에서 SQLite와 PostgreSQL 두 DB로 확인합니다.
 
 ## 실행
 
 ```bash
 pip install -r requirements.txt
 streamlit run app/main.py       # 첫 실행 시 데모 데이터를 자동 생성 (SQLite 파일)
-pytest -q                       # 테스트 91개 (API 테스트는 requirements-api.txt 설치 시)
+pytest -q                       # 테스트 96개 (API 테스트는 requirements-api.txt 설치 시)
 ```
 
 | 하고 싶은 일 | 방법 |
@@ -294,7 +311,7 @@ flowchart LR
 | GET | `/api/v1/audit` · `/api/v1/audit/verify` | 감사 추적 조회 · 해시 체인 검증 (QA·승인자·관리자) |
 
 **설계에서 정한 것**
-- **SQLite와 PostgreSQL을 모두 지원.** `MQI_DATABASE_URL`이 있으면 PostgreSQL, 없으면 SQLite 파일입니다. SQL 변환은 `mqi/db.py` 한 곳에서만 하고 분석 코드는 그대로 둡니다. 덕분에 Streamlit Cloud 데모는 계속 SQLite로 돌고, 테스트 91개는 CI에서 두 DB로 각각 실행됩니다.
+- **SQLite와 PostgreSQL을 모두 지원.** `MQI_DATABASE_URL`이 있으면 PostgreSQL, 없으면 SQLite 파일입니다. SQL 변환은 `mqi/db.py` 한 곳에서만 하고 분석 코드는 그대로 둡니다. 덕분에 Streamlit Cloud 데모는 계속 SQLite로 돌고, 테스트 96개는 CI에서 두 DB로 각각 실행됩니다.
 - **로그인 없이는 아무것도 못 한다, 역할 밖의 일도.** 토큰이 없으면 401, 역할 밖의 요청은 403, 업무 규칙 위반은 409입니다. 비밀번호와 토큰은 소금을 친 해시로만 저장합니다. 수집기도 `service` 역할 계정으로 로그인해 설비 런만 보낼 수 있고, 토큰이 만료되면 다시 로그인합니다. 실제 사용자는 `python -m mqi.auth add-user <ID> <역할> <이름>`으로 만들고, 데모가 아닌 DB에서는 앱도 로그인 전에는 아무 화면도 보여 주지 않습니다.
 - **업무 규칙 위반은 409, 입력 형식 오류는 422.** 예를 들어 OOS 조사 없이 재시험을 넣으면 409와 이유를 돌려줍니다. 호출하는 시스템이 무엇을 고쳐야 하는지 알 수 있게 하기 위해서입니다.
 - **분석은 데이터가 바뀔 때만 다시 계산.** 쓰기가 일어날 때마다 DB의 `rev` 값이 올라가고, 앱과 API는 이 값이 바뀌었을 때만 분석을 다시 돌립니다. 첫 요청 약 2초, 이후 0.2초 안팎입니다.
@@ -303,15 +320,22 @@ flowchart LR
 - **수집 공백과 설비 이상을 구분.** 배치 시작 후 2분(공정 시간)이 지나 연결된 런은 '수집 불완전'으로 두고 판정하지 않습니다.
 - **데모 데이터 판단도 DB 안에서.** 데모 버전을 파일이 아니라 DB(`meta` 테이블)에 남겨서, 컨테이너가 여러 개여도 같은 기준으로 판단합니다. 실제 공장 데이터가 든 DB는 데모로 덮어쓰지 않습니다.
 
-**다음 단계 (계획)**
-1. AI 어시스턴트: 복합 질문(로트 상태 + 대응 절차) 개선, GPU에서 7B 이상 모델로 같은 평가 재측정
-2. SECS/GEM(반도체 장비 표준) 수집 추가
-3. 사내 계정 연동(LDAP·SSO)과 비밀번호 정책·계정 잠금
+**다음 단계**는 [ROADMAP.md](ROADMAP.md), 보안 설계와 알려진 한계는 [SECURITY.md](SECURITY.md)에 있습니다.
 
 ## 검증
-- Gage R&R 제곱합은 `statsmodels` ANOVA와 1e-9 수준까지 일치 (`tests/test_stats.py`)
-- 공정능력·EWMA 조기탐지·T²는 정답을 아는 시뮬레이션으로 검증
-- JMP 비교: [`docs/jmp_validation.md`](docs/jmp_validation.md)
+
+**[통계 기능 검증표](docs/stats_validation.md): 28개 항목 모두 독립 계산과 일치 (대부분 상대 오차 1e-9 이내)**
+
+| 영역 | 앱 결과와 비교한 독립 계산 |
+|---|---|
+| Gage R&R | statsmodels 2원 ANOVA → 기대평균제곱으로 분산 성분, %StudyVar, %Tolerance, ndc |
+| 공정능력 | pandas 이동범위 σ(MR̄/d2)와 표본 σ로 Cpk·Ppk, Bissell 신뢰구간, 정규 꼬리확률 ppm, Box-Cox λ 로그우도 탐색 |
+| SPC | pandas ewm으로 EWMA, 시점별 관리한계 식, 별도 구현한 CUSUM, Nelson 1·2 규칙 건수 |
+| 다변량 | scipy 마할라노비스 거리로 Hotelling T², F 분포 관리한계 |
+
+- 데이터는 JMP 비교용으로 내보내는 것과 같은 데모 데이터이고, 같은 검사가 `tests/test_validation.py`로 커밋마다 실행됩니다.
+- 공정능력·EWMA 조기탐지·T²의 탐지 성능은 정답을 아는 시뮬레이션으로 따로 검증합니다 (`tests/test_stats.py`).
+- JMP 화면 대조 절차: [`docs/jmp_validation.md`](docs/jmp_validation.md)
 
 ## 구조
 
@@ -337,6 +361,8 @@ mqi/
   analytics/     msa · capability · spc · supplier · genealogy · changes(공정·4M)
   insight/       rules(판정) · eightd(8D) · drafts(SCAR) · llm(선택)
   engine.py      전체 분석 1회 실행
+  investigation.py  로트 1건 조사 패키지 (여러 시스템 자료를 한 번에)
+  validation.py  통계 검증표 (독립 계산과 비교)
   qms.py         조치 대장 · 고객 클레임
   outgoing.py    출하 판정 · 출하 CoA
   oos.py         검사 이력 · OOS 조사 · 재시험
@@ -365,4 +391,4 @@ Taeyang Kim · [github.com/Thisissun93](https://github.com/Thisissun93)
 ---
 
 ### English summary
-An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. Repeat tests never overwrite the first result: a lot whose first result was out of specification stays blocked until an OOS investigation either proves a laboratory error (phase 1) or confirms the failure and sets a disposition (phase 2). Mixer data is collected over OPC UA by a separate collector (batch cutting, store-and-forward) and judged per recipe step on the server, including dual-sensor agreement that catches a drifting control thermocouple; an alarmed run puts its lot on QA hold. Release takes two electronic signatures (QA review, then a different approver), each re-entering the password and bound to a SHA-256 of the lot's evidence (test history including invalidated results, OOS, equipment runs, complaints, spec); if that evidence changes, the signature no longer covers the lot. Every entry and signature goes to an append-only, hash-chained audit trail, and the API requires a bearer token with role checks. A quality assistant answers from plant data (read-only tools) and plant procedures (RAG) through an on-site LLM; guard rails, pre-fetched evidence, system-side citation and a grounding check took a 3B model from 21 % to 76 % on a 34-question evaluation, with 100 % grounded answers and refusals. The same analysis also runs as a service: PostgreSQL, a FastAPI REST API, the Streamlit app, an OPC UA equipment simulator and the collector in Docker Compose, with the full test suite running on both SQLite and PostgreSQL in CI. All data is synthetic; the test suite checks that every planted problem is found.
+An instrument-agnostic quality analytics app for an electronic-materials (underfill) plant. It recognises exports from different instrument makers, firmware versions, units and locales by structure and physical plausibility, learns unknown formats after one confirmation, and runs MSA, capability, SPC (Nelson, EWMA, CUSUM, Hotelling T²), supplier CoA trust analysis, raw-material-to-product prediction and ANCOVA-based instrument-bias detection. Findings come with evidence and next actions, plus a data-filled 8D (5W2H, IS/IS NOT, occurrence vs escape root cause, 6M, raw-limit recalculation) and SCAR, a CoA document viewer, an action register with customer complaints, MES process and 4M change-log screening, and release checks that issue an outgoing CoA. Repeat tests never overwrite the first result: a lot whose first result was out of specification stays blocked until an OOS investigation either proves a laboratory error (phase 1) or confirms the failure and sets a disposition (phase 2). Mixer data is collected over OPC UA by a separate collector (batch cutting, store-and-forward) and judged per recipe step on the server, including dual-sensor agreement that catches a drifting control thermocouple; an alarmed run puts its lot on QA hold. Release takes two electronic signatures (QA review, then a different approver), each re-entering the password and bound to a SHA-256 of the lot's evidence (test history including invalidated results, OOS, equipment runs, complaints, spec); if that evidence changes, the signature no longer covers the lot. Every entry and signature goes to an append-only, hash-chained audit trail, and the API requires a bearer token with role checks. A quality assistant answers from plant data (read-only tools) and plant procedures (RAG) through an on-site LLM; guard rails, pre-fetched evidence, system-side citation and a grounding check took a 3B model from 21 % to 76 % on a 34-question evaluation, with 100 % grounded answers and refusals. The same analysis also runs as a service: PostgreSQL, a FastAPI REST API, the Streamlit app, an OPC UA equipment simulator and the collector in Docker Compose, with the full test suite running on both SQLite and PostgreSQL in CI. For one complaint, OOS or FDC-alarm lot it gathers the investigation pack (test history, OOS, genealogy, raw-material and CoA values, batch record, equipment runs, 4M changes, other lots on the same raw lots, 8D draft) in under 0.2 s after a 2–3 s analysis run, against roughly half a day by hand in the author's experience; 28 statistics are checked against independent computations (statsmodels, pandas, scipy). All data is synthetic; the test suite checks that every planted problem is found.
