@@ -15,6 +15,8 @@ Built-in stories the analytics should find on their own:
 from __future__ import annotations
 
 import os
+import threading
+import uuid
 
 import shutil
 from datetime import date, datetime, timedelta
@@ -421,12 +423,56 @@ def is_stale(dbpath=None) -> bool:
 
 def build(folder: Path | None = None, dbpath: Path | None = None, ingest: bool = True):
     """Generate the demo files and push them through the real ingest pipeline."""
+    folder = Path(folder or config.DATA_DIR / "demo_inbox")
+    with _BUILD_LOCK:
+        return _build(folder, dbpath, ingest)
+
+
+def build_if_needed(dbpath: Path | None = None) -> bool:
+    """Build the demo plant once when the store is empty or holds an older demo; True if it built.
+
+    Several browser sessions can open the app at the same moment (Streamlit Cloud wakes up with the
+    first visitors); the lock makes the second session wait and then find the store already built.
+    """
+    with _BUILD_LOCK:
+        if db.exists(dbpath) and not is_stale(dbpath):
+            return False
+        _build(Path(config.DATA_DIR / "demo_inbox"), dbpath, True)
+        return True
+
+
+# One build at a time in this process: a second build deleting the inbox while the first writes into
+# it is what raised OSError (directory not empty) on Streamlit Cloud.
+_BUILD_LOCK = threading.RLock()
+
+
+def _replace_dir(new: Path, folder: Path) -> None:
+    """Put the freshly written files at `folder`; the old copy is moved aside, then removed if possible.
+
+    The swap is two renames, so the inbox is never half-deleted. Leftovers that cannot be removed
+    (a file another process still holds) stay in a hidden folder and are tried again next time.
+    """
+    parent = folder.parent
+    for old in parent.glob(f".{folder.name}-old-*"):
+        shutil.rmtree(old, ignore_errors=True)
+    if folder.exists():
+        trash = parent / f".{folder.name}-old-{uuid.uuid4().hex[:8]}"
+        folder.rename(trash)
+        shutil.rmtree(trash, ignore_errors=True)
+    new.rename(folder)
+
+
+def _build(folder: Path, dbpath, ingest: bool):
     from .ingest.pipeline import process_folder
 
-    folder = Path(folder or config.DATA_DIR / "demo_inbox")
-    if folder.exists():
-        shutil.rmtree(folder)
-    write_files(build_truth(), folder)
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    staging = folder.parent / f".{folder.name}-new-{uuid.uuid4().hex[:8]}"
+    try:
+        write_files(build_truth(), staging)
+        _replace_dir(staging, folder)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
     if not ingest:
         return []
     db.reset(dbpath)

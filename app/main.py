@@ -64,8 +64,8 @@ nav = st.navigation(pages)
 from mqi import demo as _demo  # noqa: E402
 if not ui.db.exists() or _demo.is_stale():
     with st.spinner("Building demo data…"):
-        _demo.build()
-    ui.clear()
+        if _demo.build_if_needed():
+            ui.clear()
 
 # a plant store (not the demo) shows nothing before sign-in
 if not ui.is_demo() and not ui.user():
