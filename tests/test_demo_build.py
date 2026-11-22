@@ -79,3 +79,50 @@ def test_build_writes_files_without_ingest(tmp_path):
     names = {p.name for p in folder.iterdir()}
     assert "stale.csv" not in names and names
     assert not [p for p in tmp_path.iterdir() if p.name.startswith(".inbox-")]
+
+
+def _clone(demo_store, tmp_path):
+    from conftest import clone_store
+
+    return clone_store(demo_store["db"], tmp_path)
+
+
+def test_complete_demo_is_not_stale(demo, tmp_path):
+    store = _clone(demo, tmp_path)
+    assert demo_mod().is_stale(store) is False
+
+
+def test_interrupted_build_marker_is_stale(demo, tmp_path):
+    from mqi import db
+
+    store = _clone(demo, tmp_path)
+    db.set_meta("demo_version", "building", store)
+    assert demo_mod().is_stale(store) is True
+
+
+def test_demo_lots_without_marker_are_stale(demo, tmp_path):
+    """What the Cloud app was left with: demo lots, no marker -> sign-in wall instead of the demo."""
+    from mqi import db
+
+    store = _clone(demo, tmp_path)
+    with db.connect(store) as con:
+        con.execute("DELETE FROM meta WHERE key=?", ("demo_version",))
+    assert db.get_meta("demo_version", store) is None
+    assert demo_mod().is_stale(store) is True
+
+
+def test_plant_data_is_never_stale(demo, tmp_path):
+    """A store with any lot outside the demo plant is plant data: never rebuilt over."""
+    from mqi import db
+
+    store = _clone(demo, tmp_path)
+    with db.connect(store) as con:
+        con.execute("DELETE FROM meta WHERE key=?", ("demo_version",))
+        con.execute("INSERT INTO lots (lot_id, material) VALUES (?, ?)", ("PLANT-0001", "product"))
+    assert demo_mod().is_stale(store) is False
+
+
+def demo_mod():
+    from mqi import demo as d
+
+    return d
