@@ -406,17 +406,32 @@ def _coa_report(out: Path, r, product: str, grade: str, qty: int, items) -> None
 DEMO_VERSION = "6"
 OOS_DEMO_LOT = "UF-2610-014"   # the lot whose first result was re-measured without an investigation
 FDC_DEMO_LOT = "UF-2611-003"   # degassed on M1 while its control thermocouple read 5 degC low
-_SIGNATURE = "UF-2609-012"          # a lot that only the demo plant has
+
+
+def demo_lot_ids() -> set[str]:
+    """Every lot the demo plant creates (the build is seeded, so this is the same in every process)."""
+    t = build_truth()
+    return set(pd.concat([t["resin"], t["filler"], t["hard"], t["product"]])["lot_id"])
 
 
 def is_stale(dbpath=None) -> bool:
-    """True for a demo database built by an older version (real plant data is never touched)."""
+    """True for a demo database that must be rebuilt (real plant data is never touched).
+
+    - built by an older demo version, or left at "building" by a build that was interrupted;
+    - no demo marker at all, but every lot in it belongs to the demo plant: a build that stopped
+      before it wrote the marker (this left the Streamlit Cloud app behind a sign-in wall).
+    A store holding any lot that is not a demo lot is plant data and is left alone.
+    """
     if not db.exists(dbpath):
         return False
     try:
-        if db.get_meta("demo_version", dbpath) == DEMO_VERSION:
+        version = db.get_meta("demo_version", dbpath)
+        if version == DEMO_VERSION:
             return False
-        return bool(len(db.read("SELECT 1 FROM lots WHERE lot_id=? LIMIT 1", (_SIGNATURE,), dbpath)))
+        if version is not None:
+            return True
+        lots = set(db.read("SELECT DISTINCT lot_id FROM lots", (), dbpath)["lot_id"])
+        return bool(lots) and lots <= demo_lot_ids()
     except Exception:
         return False
 
@@ -476,6 +491,7 @@ def _build(folder: Path, dbpath, ingest: bool):
     if not ingest:
         return []
     db.reset(dbpath)
+    db.set_meta("demo_version", "building", dbpath)   # an interrupted build is still recognised as demo
     res = process_folder(folder, dbpath)
     complaint_no = seed_complaint(dbpath)
     seed_oos_retest(dbpath, complaint_no)
