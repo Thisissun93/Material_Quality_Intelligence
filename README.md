@@ -7,7 +7,7 @@
 > **English summary** — Material quality app for semiconductor packaging materials (underfill, epoxy). It reads test files from different instruments, runs MSA, Cpk, SPC and T², checks supplier CoA data, and writes 8D and SCAR reports with real data. A retest cannot hide the first OOS result, and shipping needs two e-signatures (QA review and approval).
 >
 > - **Result:** For one customer complaint lot, it collects 61 records from 6 systems in 0.2 seconds. This work took me almost half a day by hand. ([benchmark](docs/benchmark_investigation.md))
-> - **Check:** 28 statistics (Gage R&R, Cpk, EWMA, CUSUM, T² and more) match independent calculations. 100 tests run in CI. ([validation](docs/stats_validation.md))
+> - **Check:** 28 statistics (Gage R&R, Cpk, EWMA, CUSUM, T² and more) match independent calculations. 104 tests run in CI. ([validation](docs/stats_validation.md))
 > - The demo app also has an English mode.
 > - All data is synthetic. The numbers check the method and the calculations, not accuracy in a real factory.
 
@@ -233,14 +233,14 @@ MQI_ASSISTANT_MODEL=qwen2.5:3b python -m mqi.assistant.eval --backend llm   # Ol
 | 최근 로트 1건: 첫 점도 4,640 mPa·s(USL 4,500, 측정자 Park) → 같은 시료 재측정 합격, OOS 조사 없음 | 재측정값으로 분석하되 최초 결과를 보존하고 "출하 불가: OOS 조사 필요" |
 | 최근 20개 로트의 믹서 런 중 UF-2611-003: 탈포 중 TC1이 5℃ 낮게 읽힘 (TC1은 60℃ 유지, 실제 65℃) | 20개 런 중 이 런만 알람(오알람 0), 원인 "TC1·TC2 편차 5.5℃", 출하 판정 보류 |
 
-위 결과는 `tests/`의 테스트 100개가 커밋마다 GitHub Actions에서 SQLite와 PostgreSQL 두 DB로 확인합니다.
+위 결과는 `tests/`의 테스트 104개가 커밋마다 GitHub Actions에서 SQLite와 PostgreSQL 두 DB로 확인합니다.
 
 ## 실행
 
 ```bash
 pip install -r requirements.txt
-streamlit run app/main.py       # 첫 실행 시 데모 데이터를 자동 생성 (SQLite 파일)
-pytest -q                       # 테스트 100개 (API 테스트는 requirements-api.txt 설치 시)
+streamlit run app/main.py       # 첫 실행 시 데모 데이터를 자동 생성 (SQLite 파일, 여러 세션이 동시에 열어도 한 번만 생성)
+pytest -q                       # 테스트 104개 (API 테스트는 requirements-api.txt 설치 시)
 ```
 
 | 하고 싶은 일 | 방법 |
@@ -318,7 +318,7 @@ flowchart LR
 | GET | `/api/v1/audit` · `/api/v1/audit/verify` | 감사 추적 조회 · 해시 체인 검증 (QA·승인자·관리자) |
 
 **설계에서 정한 것**
-- **SQLite와 PostgreSQL을 모두 지원.** `MQI_DATABASE_URL`이 있으면 PostgreSQL, 없으면 SQLite 파일입니다. SQL 변환은 `mqi/db.py` 한 곳에서만 하고 분석 코드는 그대로 둡니다. 덕분에 Streamlit Cloud 데모는 계속 SQLite로 돌고, 테스트 100개는 CI에서 두 DB로 각각 실행됩니다.
+- **SQLite와 PostgreSQL을 모두 지원.** `MQI_DATABASE_URL`이 있으면 PostgreSQL, 없으면 SQLite 파일입니다. SQL 변환은 `mqi/db.py` 한 곳에서만 하고 분석 코드는 그대로 둡니다. 덕분에 Streamlit Cloud 데모는 계속 SQLite로 돌고, 테스트 104개는 CI에서 두 DB로 각각 실행됩니다.
 - **로그인 없이는 아무것도 못 한다, 역할 밖의 일도.** 토큰이 없으면 401, 역할 밖의 요청은 403, 업무 규칙 위반은 409입니다. 비밀번호와 토큰은 소금을 친 해시로만 저장합니다. 수집기도 `service` 역할 계정으로 로그인해 설비 런만 보낼 수 있고, 토큰이 만료되면 다시 로그인합니다. 실제 사용자는 `python -m mqi.auth add-user <ID> <역할> <이름>`으로 만들고, 데모가 아닌 DB에서는 앱도 로그인 전에는 아무 화면도 보여 주지 않습니다.
 - **업무 규칙 위반은 409, 입력 형식 오류는 422.** 예를 들어 OOS 조사 없이 재시험을 넣으면 409와 이유를 돌려줍니다. 호출하는 시스템이 무엇을 고쳐야 하는지 알 수 있게 하기 위해서입니다.
 - **분석은 데이터가 바뀔 때만 다시 계산.** 쓰기가 일어날 때마다 DB의 `rev` 값이 올라가고, 앱과 API는 이 값이 바뀌었을 때만 분석을 다시 돌립니다. 첫 요청 약 2초, 이후 0.2초 안팎입니다.
